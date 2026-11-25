@@ -309,7 +309,8 @@
           {#each visible as row, i (row.id)}
             {@const idx = start + i}
             {@const sel = isOn(row.id)}
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <!-- Bàn phím do khung role="grid" (tabindex=0, tableKey) xử lý cho cả bảng; dòng không cần nhận focus riêng. -->
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
             <div
               class="tr"
               class:sel

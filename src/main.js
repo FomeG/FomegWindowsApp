@@ -2,7 +2,9 @@ import { mount } from 'svelte';
 import './app.css';
 import './v3.css';
 import App from './App.svelte';
-import { i18n } from './lib/i18n.svelte.js';
+import { i18n, t } from './lib/i18n.svelte.js';
+import { toasts } from './lib/toasts.svelte.js';
+import * as api from './lib/api.js';
 
 // Áp dụng theme trước khi mount để tránh nháy màu.
 try {
@@ -55,8 +57,6 @@ async function reportError(err) {
   lastErr = Date.now();
   console.error(err);
   try {
-    const { toasts } = await import('./lib/toasts.svelte.js');
-    const { t } = await import('./lib/i18n.svelte.js');
     toasts.error(t('shell.ui_error'), [msg.slice(0, 300)]);
   } catch {}
 }
@@ -64,6 +64,7 @@ window.addEventListener('error', (e) => reportError(e.error || e.message));
 window.addEventListener('unhandledrejection', (e) => reportError(e.reason));
 
 // Nạp ngôn ngữ đã chọn (tiếng Anh tải động) trước khi vẽ để không nháy chữ tiếng Việt.
+i18n.onChange = (locale) => api.setLocale(locale).catch(() => {});
 await i18n.init();
 const app = mount(App, { target: document.getElementById('app') });
 export default app;
