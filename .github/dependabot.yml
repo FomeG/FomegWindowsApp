@@ -16,7 +16,7 @@ updates:
       npm-minor: { update-types: [minor, patch] }
 
   - package-ecosystem: cargo
-    directory: /src-tauri
+    directory: /   # workspace (src-tauri + mcp), một Cargo.lock ở gốc
     target-branch: dev
     schedule: { interval: monthly }
     groups:

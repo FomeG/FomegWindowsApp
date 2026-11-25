@@ -163,6 +163,9 @@ pub fn set_approved(key: &str, name: &str, on: bool) -> Result<(), String> {
     let (k, _) = root.create_subkey(sub).map_err(reg_err)?;
     let mut bytes = vec![0u8; 12];
     bytes[0] = if on { 2 } else { 3 };
+    // .into(): winreg 0.55 dùng Vec<u8>, 0.56+ dùng Cow<[u8]> – chạy được với cả hai
+    #[allow(clippy::useless_conversion)]
+    let bytes = bytes.into();
     k.set_raw_value(name, &RegValue { bytes, vtype: RegType::REG_BINARY }).map_err(reg_err)
 }
 

@@ -22,7 +22,7 @@ npm run tauri build
 
 Bản tự build là exe portable, không tự cập nhật. Phát hành và tự cập nhật (nhánh `dev` → `main`, `npm run bump`, GitHub Actions): xem `docs/auto-update-plan.md`.
 
-File chạy: `src-tauri\target\release\fomeg-windows-app.exe` (một file duy nhất, mở là Windows hỏi quyền Admin).
+File chạy: `target\release\fomeg-windows-app.exe` (một file duy nhất, mở là Windows hỏi quyền Admin).
 
 ## Phát triển
 

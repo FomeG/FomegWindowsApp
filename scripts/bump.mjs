@@ -1,6 +1,6 @@
 // Tăng version: npm run bump 0.3.1   (hoặc: npm run bump patch | minor | major)
 // Nguồn duy nhất là package.json (tauri.conf.json và giao diện đọc từ đó). Script còn sửa version của 2 crate Rust
-// (src-tauri, mcp) và các Cargo.lock / package-lock.json để CI không phải sửa gì. Giữ nguyên CRLF / LF của từng tệp.
+// (src-tauri, mcp) và Cargo.lock (chung cho workspace) / package-lock.json để CI không phải sửa gì. Giữ nguyên CRLF / LF của từng tệp.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
 const arg = process.argv[2];
@@ -54,6 +54,5 @@ edit('package-lock.json', (s) => {
 });
 edit('src-tauri/Cargo.toml', cargoToml);
 edit('mcp/Cargo.toml', cargoToml);
-edit('src-tauri/Cargo.lock', cargoLock(['fomeg-windows-app']));
-edit('mcp/Cargo.lock', cargoLock(['fomeg-windows-app', 'fomeg-windows-app-mcp']));
+edit('Cargo.lock', cargoLock(['fomeg-windows-app', 'fomeg-windows-app-mcp']));
 console.log(`\nXong. Tiếp theo:\n  git commit -am "chore: phát hành v${to}"\n  git push   rồi mở PR dev -> main; merge xong CI tự build và phát hành v${to}.`);
