@@ -100,6 +100,15 @@ jobs:
             echo 'NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
 
+      # Tauri CLI ký bộ cài rồi tự kiểm chữ ký bằng plugins.updater.pubkey trong cấu hình (tauri.conf.json để "") ->
+      # ghi khoá công khai vào cấu hình phát hành (chỉ trên máy CI, không commit). Thiếu bước này: "Missing comment in public key".
+      - name: Ghi khoá công khai vào cấu hình phát hành
+        shell: bash
+        env:
+          PUB: ${{ vars.TAURI_UPDATER_PUBKEY }}
+        run: |
+          node -e "const fs=require('fs'),f='src-tauri/tauri.release.conf.json',j=JSON.parse(fs.readFileSync(f,'utf8'));j.plugins={updater:{pubkey:process.env.PUB.trim()}};fs.writeFileSync(f,JSON.stringify(j,null,2))"
+
       - name: Build bộ cài + tạo Release
         uses: tauri-apps/tauri-action@v1
         env:
