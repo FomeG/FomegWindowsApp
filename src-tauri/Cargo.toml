@@ -15,7 +15,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-winreg = "0.55"
+winreg = "0.56"
 chrono = "0.4"
 ureq = "3"
 rust-i18n = "3"
