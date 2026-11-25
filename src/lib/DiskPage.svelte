@@ -2,7 +2,7 @@
   // Trang Ổ cứng: chọn ổ / thư mục -> cây dung lượng kiểu TreeSize, lớn dần NGAY trong lúc quét.
   // Bảng ảo hoá (chỉ render hàng đang thấy). Chuột phải = menu gốc của Windows (bản Tauri),
   // lỗi / trình duyệt -> menu riêng (Mở, Xoá, Xoá vĩnh viễn…). Delete = Thùng rác, Shift+Delete = vĩnh viễn.
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { du } from './du.svelte.js';
   import { store } from './store.svelte.js';
   import * as api from './api.js';
@@ -44,7 +44,8 @@
 
   $effect(() => {
     du.version;
-    if (du.root && !pathFocused) pathInput = du.root;
+    const root = du.root;
+    if (root && !pathFocused) untrack(() => { pathInput = root; });
   });
   let pathFocused = false;
 

@@ -142,6 +142,18 @@ class Procs {
     return out;
   }
 
+  snapshot(pids) {
+    return new Map(Array.from(pids, (pid) => [pid, this.map.get(pid)]));
+  }
+
+  stillSame(snapshot) {
+    const same = [], gone = [];
+    for (const [pid, entry] of snapshot) {
+      (entry && this.map.get(pid) === entry ? same : gone).push(pid);
+    }
+    return { same, gone };
+  }
+
   /** Bỏ ngay các pid đã kết thúc (không chờ tick sau). */
   dropLocal(pids) {
     let n = 0;

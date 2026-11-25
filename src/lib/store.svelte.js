@@ -34,7 +34,7 @@ class Store {
   warnings = $state.raw([]);
 
   // cài đặt
-  settings = $state({ restart_apps: false, is_admin: true, log_path: '' });
+  settings = $state({ restart_apps: false, is_admin: true, log_path: '', log_dir: '', log_dir_custom: false });
   settingsLoaded = $state(false);
   restartPending = $state(false);
 
@@ -388,6 +388,18 @@ class Store {
 
   async openLocation(item) {
     try { await api.openLocation(item); } catch (e) { toasts.error(t('startup.err.open_location'), [errText(e)]); }
+  }
+
+  /** Đổi thư mục log (null = mặc định). Trả true nếu thành công. */
+  async setLogDir(dir) {
+    try {
+      const s = await api.setLogDir(dir);
+      this.settings = { ...this.settings, ...s };
+      return true;
+    } catch (e) {
+      toasts.error(t('settings.logs.err'), [errText(e)]);
+      return false;
+    }
   }
 
   async openLog() {

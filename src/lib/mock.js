@@ -3,6 +3,7 @@
 // Phần v2 (metrics, tiến trình, AI) nằm trong mock-v2.js.
 import { createV2Mock } from './mock-v2.js';
 import { createDuMock } from './mock-du.js';
+import { i18n } from './i18n.svelte.js';
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
@@ -459,7 +460,11 @@ export function createMockBackend() {
     restart_apps: true,
     is_admin: !/[?&]noadmin\b/.test(location.search),
     log_path: 'C:\\Users\\ADMIN\\AppData\\Local\\fomeg-windows-app\\log.txt',
+    log_dir: 'C:\\Users\\ADMIN\\AppData\\Local\\fomeg-windows-app',
+    log_dir_custom: false,
+    data_dir: 'C:\\Users\\ADMIN\\AppData\\Local\\fomeg-windows-app',
   };
+  const LOG_DEFAULT = settings.log_dir;
   const TOTAL = 16 * GB;
   let used = 9.2 * GB;
 
@@ -631,6 +636,24 @@ export function createMockBackend() {
     async get_settings() { await sleep(60); return { ...settings }; },
     async set_restart_apps({ on }) { await sleep(jitter(250)); settings.restart_apps = !!on; return null; },
     async mcp_info() { await sleep(30); return { path: 'C:\\Users\\ADMIN\\AppData\\Local\\fomeg-windows-app\\fomeg-windows-app-mcp.exe', exists: true, embedded: true }; },
+    async set_log_dir({ dir }) {
+      await sleep(80);
+      const path = dir?.trim().replaceAll('/', '\\');
+      const normalized = path?.replace(/\\+/g, '\\').replace(/\\$/, '');
+      if (path && (
+        !/^[a-z]:\\[^\\]/i.test(normalized)
+        || /^c:\\(?:windows|program files(?: \(x86\))?)(?:\\|$)/i.test(normalized)
+        || /^c:\\(?:users(?:\\admin)?|programdata|system volume information|recovery|boot)$/i.test(normalized)
+      )) {
+        throw i18n.locale === 'en'
+          ? 'Choose an absolute path to a local folder outside protected locations.'
+          : 'Hãy chọn đường dẫn tuyệt đối tới thư mục cục bộ nằm ngoài các vị trí được bảo vệ.'; // i18n-ignore
+      }
+      settings.log_dir = path || LOG_DEFAULT;
+      settings.log_dir_custom = !!path;
+      settings.log_path = `${settings.log_dir}\\log.txt`;
+      return { ...settings };
+    },
     async open_log() { await sleep(100); console.info('[mock] open_log', settings.log_path); return null; },
     async ports_list({ udp }) {
       await sleep(jitter(30));

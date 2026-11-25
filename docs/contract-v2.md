@@ -69,6 +69,15 @@ Starts the app's own exe with `ShellExecuteEx("runas")` (UAC prompt) and exits t
 ### Command `set_locale({ locale })`
 `"vi"` (default) or `"en"`: language of backend messages (`tr!`, `src-tauri/locales/*.yml`) and of the AI assistant's replies.
 
+### Command `get_settings()` → `Settings`
+`{ restart_apps, is_admin, log_path, log_dir, log_dir_custom, data_dir }`. `log_dir` is the folder holding `log.txt`
+(the user's choice, else `data_dir` = `%LOCALAPPDATA%\fomeg-windows-app`).
+
+### Command `set_log_dir({ dir })` → `Settings`
+`dir` = an absolute folder (from `du_pick_folder`), or `null` = back to the default. Refused: drive roots, UNC paths,
+`du::protected` folders, anything under Windows / Program Files (the app runs elevated). The folder is created and
+write-tested before it is saved to `<data_dir>\log_dir.txt`; an existing `log.txt` is moved over when the new folder has none.
+
 ## Auto update (`src-tauri/src/update.rs`, see `docs/auto-update-plan.md`)
 
 ### Command `update_info()` → `{ enabled, version, repo }`

@@ -288,15 +288,37 @@ pub struct Settings {
     restart_apps: bool,
     is_admin: bool,
     log_path: String,
+    /// thư mục chứa log.txt
+    log_dir: String,
+    /// người dùng đã chọn thư mục log riêng (không phải mặc định)
+    log_dir_custom: bool,
+    /// thư mục dữ liệu của app (LOCALAPPDATA, thư mục fomeg-windows-app)
+    data_dir: String,
 }
 
 #[tauri::command]
 pub fn get_settings() -> Settings {
+    let s = |p: Option<std::path::PathBuf>| p.map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
     Settings {
         restart_apps: registry::read_restart_apps(),
         is_admin: crate::is_elevated(),
-        log_path: util::log_path().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
+        log_path: s(util::log_path()),
+        log_dir: s(util::log_dir()),
+        log_dir_custom: util::log_dir_is_custom(),
+        data_dir: s(util::data_dir()),
     }
+}
+
+/// Đổi thư mục lưu log (Cài đặt → Nhật ký); `dir` null = về mặc định `%LOCALAPPDATA%\fomeg-windows-app`.
+/// Trả lại Settings mới để giao diện cập nhật đường dẫn.
+#[tauri::command]
+pub async fn set_log_dir(dir: Option<String>) -> Result<Settings, String> {
+    blocking(move || {
+        util::set_log_dir(dir.as_deref())?;
+        util::log_line(&format!("Thư mục log: {}", util::log_dir().map(|p| p.display().to_string()).unwrap_or_default()));
+        Ok(get_settings())
+    })
+    .await?
 }
 
 #[tauri::command]
@@ -529,10 +551,14 @@ pub async fn proc_lookup(targets: Vec<String>) -> Result<Vec<ProcLookup>, String
 #[tauri::command]
 pub async fn proc_kill(state: St<'_>, pids: Vec<u32>, tree: bool) -> Result<Vec<KillRes>, String> {
     let st = state.inner().clone();
+    let targets: Vec<_> = {
+        let times = st.proc_creation_times.lock().map_err(|_| tr!("errors.lock"))?;
+        pids.into_iter().map(|pid| (pid, times.get(&pid).copied())).collect()
+    };
     let r = blocking(move || {
-        let r: Vec<KillRes> = pids
+        let r: Vec<KillRes> = targets
             .into_iter()
-            .map(|pid| match proc_actions::kill(pid, tree) {
+            .map(|(pid, expected_time)| match proc_actions::kill(pid, tree, expected_time) {
                 Ok(()) => {
                     util::log_line(&format!("[Tiến trình] Kết thúc PID {pid}{}", if tree { " (cả cây)" } else { "" }));
                     KillRes { pid, ok: true, error: None }
@@ -559,8 +585,9 @@ pub struct RestartRes {
 #[tauri::command]
 pub async fn proc_restart(state: St<'_>, pid: u32) -> Result<RestartRes, String> {
     let st = state.inner().clone();
+    let expected_time = st.proc_creation_times.lock().map_err(|_| tr!("errors.lock"))?.get(&pid).copied();
     blocking(move || {
-        let r = match proc_actions::restart(pid) {
+        let r = match proc_actions::restart(pid, expected_time) {
             Ok(n) => {
                 util::log_line(&format!("[Tiến trình] Khởi động lại PID {pid} -> {n}"));
                 RestartRes { ok: true, pid: Some(n), error: None }

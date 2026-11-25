@@ -39,6 +39,8 @@ export const openLocation = (item) => call('open_location', { item });
 export const getSettings = () => call('get_settings');
 export const setRestartApps = (on) => call('set_restart_apps', { on });
 export const openLog = () => call('open_log');
+/** Đổi thư mục lưu log (null = mặc định); trả Settings mới */
+export const setLogDir = (dir) => call('set_log_dir', { dir });
 /** MCP server chỉ đọc (fomeg-windows-app-mcp.exe cạnh exe của app): { path, exists }. */
 export const mcpInfo = () => call('mcp_info');
 export const ramHistory = () => call('ram_history');

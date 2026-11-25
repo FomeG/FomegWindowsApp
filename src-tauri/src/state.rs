@@ -85,6 +85,8 @@ pub struct AppState {
     pub reset_ram: AtomicBool,
     /// Gửi lại toàn bộ danh sách tiến trình ở lần đo tới.
     pub reset_procs: AtomicBool,
+    /// Thời điểm tạo (FILETIME) của từng PID trong mẫu gần nhất.
+    pub proc_creation_times: Mutex<HashMap<u32, u64>>,
     pub watch_procs: AtomicBool,
     pub visible: AtomicBool,
     /// 0 = tạm dừng cập nhật giao diện.
@@ -126,6 +128,7 @@ impl AppState {
             tracked: Mutex::new(Vec::new()),
             reset_ram: AtomicBool::new(true),
             reset_procs: AtomicBool::new(true),
+            proc_creation_times: Mutex::new(HashMap::new()),
             watch_procs: AtomicBool::new(false),
             visible: AtomicBool::new(true),
             interval_ms: AtomicU64::new(1000),

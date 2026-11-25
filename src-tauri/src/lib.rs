@@ -77,6 +77,7 @@ pub fn run(mcp_exe: &'static [u8]) {
             commands::service_control,
             commands::open_location,
             commands::get_settings,
+            commands::set_log_dir,
             commands::set_restart_apps,
             commands::open_log,
             commands::mcp_info,

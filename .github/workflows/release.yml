@@ -81,22 +81,14 @@ jobs:
       - name: Cài gói npm
         run: npm ci
 
-      # Ghi chú phát hành = các commit kể từ tag trước (bỏ commit merge và commit "chore: phát hành …")
+      # Ghi chú phát hành = mục "## <version>" của CHANGELOG.md (vi + en); chưa viết thì lấy commit feat/fix/perf kể từ tag trước
       - name: Ghi chú phát hành
         id: notes
         shell: bash
         run: |
-          prev=$(git describe --tags --abbrev=0 2>/dev/null || true)
-          log=$(git log --no-merges --pretty='- %s' ${prev:+$prev..}HEAD -- src src-tauri mcp | grep -viE '^- (chore|ci|docs)(\(.*\))?:' | head -40 || true)
           {
             echo 'body<<NOTES_EOF'
-            echo '## Có gì mới / What’s new'
-            echo
-            if [ -n "$log" ]; then echo "$log"; else echo '- Cải thiện và sửa lỗi nhỏ / Minor fixes and improvements'; fi
-            echo
-            echo '---'
-            echo 'Cài lần đầu: tải `*_x64-setup.exe` bên dưới. Đã cài rồi: app tự báo và cập nhật.'
-            echo 'First install: download `*_x64-setup.exe` below. Already installed: the app updates itself.'
+            node scripts/release-notes.mjs "${{ needs.version.outputs.version }}"
             echo 'NOTES_EOF'
           } >> "$GITHUB_OUTPUT"
 
@@ -128,3 +120,20 @@ jobs:
           uploadUpdaterJson: true
           # tên tệp gọn, không dấu cách / dấu nháy: fomeg-windows-app_0.3.0_x64-setup.exe (+ .sig); latest.json theo đúng tên này
           releaseAssetNamePattern: '[mainBinaryName]_[version]_[arch][setup][ext]'
+
+      # SHA-256 của bộ cài: tệp <setup>.exe.sha256 bên cạnh + một dòng trong ghi chú (thay dấu <!-- sha256 --> của release-notes.mjs)
+      - name: SHA-256 cho bộ cài
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for f in target/release/bundle/nsis/*-setup.exe; do exe="$f"; done
+          name="fomeg-windows-app_${VER}_x64-setup.exe"
+          hash=$(sha256sum "$exe" | cut -d' ' -f1)
+          echo "$hash  $name" > "$name.sha256"
+          gh release upload "v$VER" "$name.sha256" --clobber
+          gh release view "v$VER" --json body -q .body > body.md
+          node -e "const fs=require('fs');const b=fs.readFileSync('body.md','utf8');fs.writeFileSync('body.md',b.replace('<!-- sha256 -->',process.argv[1]))" -- "- **SHA-256** \`$name\`: \`$hash\`"
+          gh release edit "v$VER" --notes-file body.md

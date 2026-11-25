@@ -70,3 +70,6 @@ features = [
   "ApplicationModel",
   "Management_Deployment",
 ]
+
+[profile.dev]
+incremental = true
