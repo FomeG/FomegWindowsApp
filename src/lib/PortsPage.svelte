@@ -39,8 +39,14 @@
   // ---------- tải định kỳ ----------
   let busy = false;
   let quick = 0;
+  let destroyed = false;
+
+  function canPoll() {
+    return !destroyed && !document.hidden && prefs.interval > 0;
+  }
+
   async function load() {
-    if (busy) return;
+    if (busy || !canPoll()) return;
     busy = true;
     try {
       const r = await api.portsList(udp);
@@ -49,7 +55,12 @@
       err = '';
       loaded = true;
       // tiến trình mới chưa có tên -> hỏi lại sớm một lần (monitor vừa được đánh thức)
-      if (r?.pending && !quick) quick = setTimeout(() => { quick = 0; load(); }, 400);
+      if (r?.pending && !quick && canPoll()) {
+        quick = setTimeout(() => {
+          quick = 0;
+          load();
+        }, 400);
+      }
     } catch (e) {
       err = errText(e);
       loaded = true;
@@ -59,11 +70,14 @@
   }
   onMount(() => {
     load();
-    const timer = setInterval(() => {
-      if (!document.hidden && prefs.interval > 0) load();
-    }, POLL_MS);
+    const timer = setInterval(load, POLL_MS);
     window.addEventListener(PORTS_CHANGED, load);
-    return () => { clearInterval(timer); clearTimeout(quick); window.removeEventListener(PORTS_CHANGED, load); };
+    return () => {
+      destroyed = true;
+      clearInterval(timer);
+      clearTimeout(quick);
+      window.removeEventListener(PORTS_CHANGED, load);
+    };
   });
   function setUdp(v) {
     udp = v;
@@ -166,6 +180,9 @@
     const why = blockedOf(list);
     if (why) return toasts.error(t('ports.toast.end_failed', { port }), [why]);
     const pids = [...new Set(list.map((u) => u.pid))];
+    const snapshot = new Map(pids.map((pid) => [pid, procs.map.get(pid)]));
+    const ownerKey = ({ pid, port, proto }) => `${pid}:${port}:${proto}`;
+    const confirmedOwners = new Set(list.map(ownerKey));
     const relay = relayOf(list);
     const yes = await store.confirm({
       title: t('ports.confirm.title', { port }),
@@ -175,10 +192,27 @@
     });
     if (!yes) return;
     try {
-      const res = (await api.procKill(pids, false)) || [];
-      const errors = res.filter((x) => !x.ok).map((x) => `PID ${x.pid}: ${x.error || t('ports.error')}`);
-      const ok = res.length - errors.length;
-      if (res.length === 1) {
+      // Trang Cổng không bật luồng tiến trình, nên kiểm tra lại chủ cổng nếu chưa có trong bộ nhớ.
+      const verifiedOwners = new Set();
+      if (pids.some((pid) => !snapshot.get(pid)) && canPoll()) {
+        const fresh = await api.portsList(udp);
+        for (const owner of fresh?.uses || []) {
+          if (confirmedOwners.has(ownerKey(owner))) verifiedOwners.add(owner.pid);
+        }
+      }
+      const currentPids = [];
+      const errors = [];
+      for (const pid of pids) {
+        const previous = snapshot.get(pid);
+        const sameOwner = previous ? procs.map.get(pid) === previous : verifiedOwners.has(pid);
+        if (sameOwner) currentPids.push(pid);
+        else errors.push(`PID ${pid}: ${t('ai.review.kill.not_found')}`);
+      }
+      const res = currentPids.length ? (await api.procKill(currentPids, false)) || [] : [];
+      const failed = res.filter((x) => !x.ok);
+      for (const { pid, error } of failed) errors.push(`PID ${pid}: ${error || t('ports.error')}`);
+      const ok = res.length - failed.length;
+      if (ok + errors.length === 1) {
         if (errors.length) toasts.error(t('ports.toast.end_failed', { port }), errors);
         else toasts.success(t('ports.toast.freed', { port }), [procText(list)]);
       } else summarize(t('ports.summ.verb'), t('ports.summ.unit'), ok, errors);

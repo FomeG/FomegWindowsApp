@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
+use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 use crate::tr;
 
 use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
+use windows::Win32::Foundation::{ERROR_INVALID_DRIVE, ERROR_NOT_READY, GENERIC_WRITE};
+use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, DELETE, FILE_FLAG_DELETE_ON_CLOSE};
 use windows::Win32::System::Environment::ExpandEnvironmentStringsW;
 
 pub fn wide(s: &str) -> Vec<u16> {
@@ -214,7 +216,7 @@ fn custom_log_dir() -> Option<PathBuf> {
     let v = data_dir()
         .and_then(|d| std::fs::read_to_string(d.join("log_dir.txt")).ok())
         .map(|s| PathBuf::from(s.trim()))
-        .filter(|p| !p.as_os_str().is_empty() && log_dir_allowed(p));
+        .and_then(|p| resolve_log_dir(&p).ok());
     if let Ok(mut g) = LOG_DIR.write() {
         *g = Some(v.clone());
     }
@@ -223,7 +225,7 @@ fn custom_log_dir() -> Option<PathBuf> {
 
 /// App chạy bằng quyền Admin: không ghi log vào thư mục hệ thống / Program Files / gốc ổ, kể cả khi tệp cấu hình bị sửa tay.
 fn log_dir_allowed(p: &Path) -> bool {
-    let s = p.to_string_lossy().trim_end_matches('\\').to_lowercase();
+    let s = p.to_string_lossy().replace('/', "\\").trim_end_matches('\\').to_lowercase();
     if !p.is_absolute() || s.starts_with(r"\\") || super::du::protected(&s) {
         return false;
     }
@@ -232,6 +234,53 @@ fn log_dir_allowed(p: &Path) -> bool {
         .iter()
         .map(|k| env(k))
         .any(|root| !root.is_empty() && (s == root || s.starts_with(&format!("{root}\\"))))
+}
+
+fn log_dir_io_error(e: std::io::Error) -> String {
+    tr!("app.err.log_dir_unwritable", err = e.to_string())
+}
+
+fn missing_log_path(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::NotFound
+        || e.raw_os_error().is_some_and(|code| {
+            code as u32 == ERROR_INVALID_DRIVE.0 || code as u32 == ERROR_NOT_READY.0
+        })
+}
+
+fn checked_log_dir(resolved: &Path) -> Result<PathBuf, String> {
+    let resolved = resolved.to_str().ok_or_else(|| tr!("app.err.log_dir_protected"))?;
+    let p = Path::new(resolved.strip_prefix(r"\\?\").unwrap_or(resolved));
+    if !log_dir_allowed(p) {
+        return Err(tr!("app.err.log_dir_protected"));
+    }
+    Ok(p.to_owned())
+}
+
+fn resolve_log_dir(p: &Path) -> Result<PathBuf, String> {
+    if !log_dir_allowed(p) {
+        return Err(tr!("app.err.log_dir_protected"));
+    }
+    let path = std::path::absolute(p).map_err(log_dir_io_error)?;
+    for ancestor in path.ancestors() {
+        match std::fs::canonicalize(ancestor) {
+            Ok(mut resolved) => {
+                let tail = path.strip_prefix(ancestor).expect("đường dẫn phải chứa thư mục cha");
+                if !tail.as_os_str().is_empty() {
+                    resolved.push(tail);
+                }
+                return checked_log_dir(&resolved);
+            }
+            Err(e) if missing_log_path(&e) => {
+                // Junction hoặc symlink còn tồn tại dù đích biến mất thì không thể xác minh.
+                if !std::fs::symlink_metadata(ancestor).is_err_and(|e| missing_log_path(&e)) {
+                    return Err(log_dir_io_error(e));
+                }
+            }
+            Err(e) => return Err(log_dir_io_error(e)),
+        }
+    }
+    // Ổ đĩa có thể chưa được gắn; giữ đường dẫn nếu nó vẫn hợp lệ.
+    checked_log_dir(&path)
 }
 
 /// Thư mục chứa log.txt: thư mục người dùng chọn, không thì data_dir.
@@ -248,15 +297,26 @@ pub fn set_log_dir(dir: Option<&str>) -> Result<(), String> {
     let old = log_path();
     let new_dir = match dir.map(str::trim).filter(|s| !s.is_empty()) {
         Some(d) => {
-            let p = PathBuf::from(d);
-            if !log_dir_allowed(&p) {
+            let requested = Path::new(d);
+            let before = resolve_log_dir(requested)?;
+            std::fs::create_dir_all(&before).map_err(log_dir_io_error)?;
+            let after = std::fs::canonicalize(requested).map_err(log_dir_io_error)?;
+            let p = checked_log_dir(&after)?;
+            if p != before {
                 return Err(tr!("app.err.log_dir_protected"));
             }
-            std::fs::create_dir_all(&p).map_err(|e| e.to_string())?;
-            // thử ghi trước khi lưu, để không chuyển sang một thư mục không ghi được
-            let probe = p.join(".fomeg-write-test");
-            std::fs::write(&probe, b"").map_err(|e| tr!("app.err.log_dir_unwritable", err = e.to_string()))?;
-            let _ = std::fs::remove_file(&probe);
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let probe = p.join(format!(".fomeg-write-test-{}-{stamp}", std::process::id()));
+            // Xoá đúng tệp vừa tạo khi đóng handle, không xoá theo tên đường dẫn.
+            std::fs::OpenOptions::new()
+                .access_mode(GENERIC_WRITE.0 | DELETE.0)
+                .custom_flags(FILE_FLAG_DELETE_ON_CLOSE.0)
+                .create_new(true)
+                .open(probe)
+                .map_err(|e| tr!("app.err.log_dir_unwritable", err = e.to_string()))?;
             Some(p)
         }
         None => None,
@@ -265,9 +325,11 @@ pub fn set_log_dir(dir: Option<&str>) -> Result<(), String> {
     std::fs::create_dir_all(&cfg).map_err(|e| e.to_string())?;
     match &new_dir {
         Some(p) => std::fs::write(cfg.join("log_dir.txt"), p.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?,
-        None => {
-            let _ = std::fs::remove_file(cfg.join("log_dir.txt"));
-        }
+        None => match std::fs::remove_file(cfg.join("log_dir.txt")) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(tr!("app.err.log_dir_reset", err = e.to_string())),
+        },
     }
     if let Ok(mut g) = LOG_DIR.write() {
         *g = Some(new_dir);
@@ -285,6 +347,7 @@ pub fn log_path() -> Option<PathBuf> {
 }
 
 pub fn log_line(msg: &str) {
+    // Mỗi lần ghi mở theo tên; junction bị đổi sau khi xác minh sẽ không được kiểm tra lại.
     if let Some(d) = log_dir() {
         let _ = std::fs::create_dir_all(&d);
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(d.join("log.txt")) {

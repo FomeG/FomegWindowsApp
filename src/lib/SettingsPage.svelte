@@ -326,7 +326,7 @@
           <OptionRow glyph="download" title={t('update.set.check')} desc={updater.avail ? t('update.set.avail', { v: updater.avail.version }) : updater.lastCheck ? t('update.set.latest_at', { time: new Date(updater.lastCheck).toLocaleTimeString(i18n.intl, { hour: '2-digit', minute: '2-digit' }) }) : t('update.set.never')}>
             {#snippet below()}{#if updater.error}<span class="small ai-error">{updater.error}</span>{/if}{/snippet}
             {#if updater.avail}
-              <button type="button" class="btn sm primary" disabled={updater.phase !== 'idle'} onclick={() => updater.install()}><Glyph name="download" size={12} /> {t('update.btn.install')}</button>
+              <button type="button" class="btn sm primary" disabled={updater.phase !== 'idle'} onclick={() => updater.confirmInstall()}><Glyph name="download" size={12} /> {t('update.btn.install')}</button>
             {/if}
             <button type="button" class="btn sm" disabled={updater.checking || updater.phase !== 'idle'} onclick={() => updater.check({ manual: true })}>{#if updater.checking}<span class="spin xs"></span>{/if} {t('update.set.check_now')}</button>
           </OptionRow>

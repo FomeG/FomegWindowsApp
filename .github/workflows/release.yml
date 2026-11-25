@@ -135,5 +135,5 @@ jobs:
           echo "$hash  $name" > "$name.sha256"
           gh release upload "v$VER" "$name.sha256" --clobber
           gh release view "v$VER" --json body -q .body > body.md
-          node -e "const fs=require('fs');const b=fs.readFileSync('body.md','utf8');fs.writeFileSync('body.md',b.replace('<!-- sha256 -->',process.argv[1]))" "- **SHA-256** \`$name\`: \`$hash\`"
+          node -e "const fs=require('fs');const b=fs.readFileSync('body.md','utf8');fs.writeFileSync('body.md',b.replace('<!-- sha256 -->',process.argv[1]))" -- "- **SHA-256** \`$name\`: \`$hash\`"
           gh release edit "v$VER" --notes-file body.md

@@ -483,8 +483,8 @@ fn descendants(root: ProcessEntry, entries: Vec<ProcessEntry>) -> Vec<ProcessEnt
 }
 
 /// Kết thúc tiến trình ngay. Nếu chọn cả cây, xử lý các tiến trình con sâu nhất trước.
-pub fn kill(pid: u32, tree: bool) -> Result<(), String> {
-    let root = Target::open(pid, None)?;
+pub fn kill(pid: u32, tree: bool, expected_time: Option<u64>) -> Result<(), String> {
+    let root = Target::open(pid, expected_time)?;
     if !tree {
         return root.exit(pid, Instant::now() + EXIT_WAIT);
     }
@@ -646,14 +646,14 @@ fn shell_token(session: u32, user: &TokenSid) -> Result<Handle, String> {
 }
 
 /// Khởi động lại với dòng lệnh, người dùng, phiên và mức nâng quyền của tiến trình cũ.
-pub fn restart(pid: u32) -> Result<u32, String> {
+pub fn restart(pid: u32, expected_time: Option<u64>) -> Result<u32, String> {
     check_pid(pid)?;
     let mut session = 0;
     // Phiên 0 bị từ chối ngay cả khi ứng dụng không đọc được token đích.
     if unsafe { ProcessIdToSessionId(pid, &mut session) }.is_ok() && session == 0 {
         return Err(tr!(SERVICE));
     }
-    let target = Target::open(pid, None)?;
+    let target = Target::open(pid, expected_time)?;
     let token_error = |err: Error| action_error("procs.act.read_token", &err);
     let target_token = open_token(target.handle.0, TOKEN_QUERY).map_err(token_error)?;
     let session = token_number(target_token.0, TokenSessionId).map_err(token_error)?;

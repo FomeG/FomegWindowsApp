@@ -102,6 +102,7 @@ const ports = {
         blocked,
         checked: !blocked,
         pids: [...new Set(uses.map((u) => u.pid))],
+        owners: new Map(uses.map((u) => [u.pid, (u.name || '').toLowerCase()])),
         side: reach ? REACH[reach][0] : '',
       };
     });
@@ -109,13 +110,18 @@ const ports = {
   confirmLabel: (o, n) => (n ? t('ai.review.ports.confirm_n', cnt(n)) : t('ai.review.ports.confirm')),
   summary: (chosen) => t('ai.review.ports.summary', cnt(chosen.length, { procs: fmtInt(new Set(chosen.flatMap((r) => r.pids)).size) })),
   async run(chosen) {
-    const pids = [...new Set(chosen.flatMap((r) => r.pids))];
-    const res = (await api.procKill(pids, false)) || [];
+    const fresh = (await api.portsList(true))?.uses || [];
+    const matching = new Map(chosen.map((r) => [r.key, new Set(r.pids.filter((pid) =>
+      fresh.some((u) => u.port === Number(r.key) && u.pid === pid && u.name && u.name.toLowerCase() === r.owners.get(pid))
+    ))]));
+    const pids = [...new Set(chosen.flatMap((r) => [...matching.get(r.key)]))];
+    const res = pids.length ? (await api.procKill(pids, false)) || [] : [];
     const byPid = new Map(res.map((x) => [x.pid, x]));
     const out = new Map();
     for (const r of chosen) {
-      const bad = r.pids.map((p) => byPid.get(p)).find((x) => !x?.ok);
-      out.set(r.key, bad ? { ok: false, error: `PID ${bad?.pid ?? '?'}: ${bad?.error || t('ai.review.ports.no_response')}` } : { ok: true });
+      const bad = r.pids.find((pid) => !matching.get(r.key).has(pid) || !byPid.get(pid)?.ok);
+      const error = matching.get(r.key).has(bad) ? byPid.get(bad)?.error || t('ai.review.ports.no_response') : t('ai.review.kill.not_found');
+      out.set(r.key, bad == null ? { ok: true } : { ok: false, error: `PID ${bad}: ${error}` });
     }
     return out;
   },
@@ -331,6 +337,7 @@ const kill = {
         blocked,
         checked: !blocked,
         pids: live.map((p) => p.pid),
+        lookupTargets: [...new Set(live.map((p) => p.target))],
         mem,
         side: !g.procs.length
           ? ''
@@ -357,13 +364,20 @@ const kill = {
       mem: fmtBytes(chosen.reduce((a, r) => a + r.mem, 0)),
     })),
   async run(chosen, o) {
-    const res = (await api.procKill([...new Set(chosen.flatMap((r) => r.pids))], !!o.tree)) || [];
+    const fresh = (await api.procLookup([...new Set(chosen.flatMap((r) => r.lookupTargets))])) || [];
+    const names = new Map(fresh.filter((p) => p.name && !p.blocked).map((p) => [p.pid, p.name.toLowerCase()]));
+    const same = (r, pid) => names.get(pid) === r.label.toLowerCase();
+    const pids = [...new Set(chosen.flatMap((r) => r.pids.filter((pid) => same(r, pid))))];
+    const res = pids.length ? (await api.procKill(pids, !!o.tree)) || [] : [];
     const by = new Map(res.map((x) => [x.pid, x]));
     return new Map(chosen.map((r) => {
       // tiến trình con có thể đã thoát cùng tiến trình cha -> "không tìm thấy" không tính là lỗi
       // (so với lỗi của backend, tiếng Việt hoặc tiếng Anh)
+      const gone = r.pids.filter((pid) => !same(r, pid)).length;
       const bad = r.pids.map((pid) => by.get(pid)).filter((x) => x && !x.ok && !/không tìm thấy|đã thoát|không còn|not found|exited|no longer/i.test(x.error || '')); // i18n-ignore: đọc chữ của model / backend
-      return [r.key, bad.length ? { ok: false, error: t('ai.review.kill.partial', cnt(r.pids.length, { bad: fmtInt(bad.length), error: bad[0].error })) } : { ok: true }];
+      const failed = gone + bad.length;
+      const error = gone ? t('ai.review.kill.not_found') : bad[0]?.error;
+      return [r.key, failed ? { ok: false, error: t('ai.review.kill.partial', cnt(r.pids.length, { bad: fmtInt(failed), error })) } : { ok: true }];
     }));
   },
   after(ok, fail) {

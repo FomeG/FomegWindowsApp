@@ -47,7 +47,7 @@
             <b class="mono">v{avail.version}</b>
             <span class="cl-tag new">{t('changes.not_installed')}</span>
             <span class="grow"></span>
-            <button type="button" class="btn sm primary" disabled={updater.phase !== 'idle'} onclick={() => updater.install()}><Glyph name="download" size={12} /> {t('update.btn.install')}</button>
+            <button type="button" class="btn sm primary" disabled={updater.phase !== 'idle'} onclick={() => updater.confirmInstall()}><Glyph name="download" size={12} /> {t('update.btn.install')}</button>
           </div>
           <div class="md cl-body">{@html renderMarkdown(notesFor(avail.notes, i18n.locale))}</div>
         </div>

@@ -3,6 +3,7 @@
 // Bản tự build (không có repo / khoá do CI nhúng) -> info.enabled = false, không kiểm tra gì.
 import * as api from './api.js';
 import { prefs, loadPref, savePref } from './prefs.svelte.js';
+import { store } from './store.svelte.js';
 import { toasts } from './toasts.svelte.js';
 import { errText } from './format.js';
 import { t, i18n } from './i18n.svelte.js';
@@ -113,6 +114,24 @@ class Updater {
   skip() {
     if (this.avail) savePref('update:skip', this.avail.version);
     this.hidden = true;
+  }
+
+  /** Hỏi xác nhận rồi cài (đang dọn dẹp / gỡ ứng dụng thì app đóng giữa chừng). Mọi nút "Cập nhật" dùng hàm này. */
+  async confirmInstall(retry = true) {
+    if (!this.avail || this.phase !== 'idle') return;
+    const v = this.avail.version;
+    const ok = await store.confirm({
+      title: t('update.confirm.title', { v }),
+      message: t('update.confirm.message'),
+      okLabel: t('update.btn.install'),
+    });
+    if (!ok) return;
+    // Trong lúc hỏi, một lần kiểm tra có thể đã thấy bản khác: không cài bản người dùng chưa xác nhận.
+    if (this.avail?.version !== v) {
+      if (retry && this.avail) this.confirmInstall(false);
+      return;
+    }
+    this.install();
   }
 
   async install() {

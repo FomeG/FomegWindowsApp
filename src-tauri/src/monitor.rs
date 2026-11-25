@@ -112,6 +112,18 @@ pub fn spawn(app: AppHandle, st: Arc<AppState>) {
                 last_start = Some(started);
 
                 let s = ps.sample();
+                if !s.removed.is_empty() || !s.added.is_empty() {
+                    let mut times = st.proc_creation_times.lock().unwrap_or_else(|e| e.into_inner());
+                    // PID tái sử dụng xuất hiện ở cả hai danh sách: xóa bản cũ trước.
+                    for pid in &s.removed {
+                        times.remove(pid);
+                    }
+                    for p in &s.added {
+                        if let Some(created) = ps.creation_time(p.pid) {
+                            times.insert(p.pid, created);
+                        }
+                    }
+                }
                 let m = ms.sample();
                 let (gpus, gpu_pid) = gs.sample();
                 let total = m.mem.total;

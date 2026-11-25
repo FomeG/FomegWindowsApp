@@ -551,10 +551,14 @@ pub async fn proc_lookup(targets: Vec<String>) -> Result<Vec<ProcLookup>, String
 #[tauri::command]
 pub async fn proc_kill(state: St<'_>, pids: Vec<u32>, tree: bool) -> Result<Vec<KillRes>, String> {
     let st = state.inner().clone();
+    let targets: Vec<_> = {
+        let times = st.proc_creation_times.lock().map_err(|_| tr!("errors.lock"))?;
+        pids.into_iter().map(|pid| (pid, times.get(&pid).copied())).collect()
+    };
     let r = blocking(move || {
-        let r: Vec<KillRes> = pids
+        let r: Vec<KillRes> = targets
             .into_iter()
-            .map(|pid| match proc_actions::kill(pid, tree) {
+            .map(|(pid, expected_time)| match proc_actions::kill(pid, tree, expected_time) {
                 Ok(()) => {
                     util::log_line(&format!("[Tiến trình] Kết thúc PID {pid}{}", if tree { " (cả cây)" } else { "" }));
                     KillRes { pid, ok: true, error: None }
@@ -581,8 +585,9 @@ pub struct RestartRes {
 #[tauri::command]
 pub async fn proc_restart(state: St<'_>, pid: u32) -> Result<RestartRes, String> {
     let st = state.inner().clone();
+    let expected_time = st.proc_creation_times.lock().map_err(|_| tr!("errors.lock"))?.get(&pid).copied();
     blocking(move || {
-        let r = match proc_actions::restart(pid) {
+        let r = match proc_actions::restart(pid, expected_time) {
             Ok(n) => {
                 util::log_line(&format!("[Tiến trình] Khởi động lại PID {pid} -> {n}"));
                 RestartRes { ok: true, pid: Some(n), error: None }

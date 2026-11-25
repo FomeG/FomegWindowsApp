@@ -12,6 +12,12 @@ app.err.log_dir_protected:
 app.err.log_dir_unwritable:
   vi: 'Không ghi được vào thư mục này: %{err}'
   en: 'Can’t write to this folder: %{err}'
+app.err.log_dir_reset:
+  vi: 'Không đặt lại được thư mục log: %{err}'
+  en: 'Could not reset the log folder: %{err}'
+apps.err.resume_installer:
+  vi: 'Không chạy tiếp được trình gỡ hoặc trình sửa ứng dụng: %{e}'
+  en: 'Could not resume the uninstaller or app repair tool: %{e}'
 app.err.bad_interval:
   vi: 'Chu kỳ cập nhật không hợp lệ.'
   en: 'Invalid update interval.'

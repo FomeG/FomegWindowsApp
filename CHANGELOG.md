@@ -19,6 +19,13 @@ Vietnamese version: [CHANGELOG.vi.md](CHANGELOG.vi.md).
 - **Opening the log moved to Settings → Logs.**
 - **Cleaner notes in the update bar.** "What’s new" shows only the part in your language.
 
+### Fixed
+
+- **Update buttons ask first.** The Update buttons in "What’s new" and in Settings → About ask for confirmation, like the update bar.
+- **Less background work.** The Ports page stops refreshing after you leave it or while updates are paused, and the RAM chart of startup and service items stops recording while paused.
+- **Ending a process re-checks it right before acting.** On the Processes and Ports pages and in AI assistant proposals, a process that exited or whose PID was taken by another program after you confirmed is skipped and reported instead of being hit by mistake.
+- **Uninstall no longer waits forever.** If an app's uninstaller could not be started, uninstalling reports the error instead of hanging.
+
 ## [0.3.0] - 2026-11-25
 
 First release with an installer and auto update, in two languages.

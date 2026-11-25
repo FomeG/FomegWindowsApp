@@ -19,6 +19,13 @@ Bản tiếng Anh: [CHANGELOG.md](CHANGELOG.md).
 - **Mở log chuyển vào Cài đặt → Nhật ký.**
 - **Ghi chú trên thanh cập nhật gọn hơn.** "Có gì mới" chỉ hiện phần đúng ngôn ngữ đang dùng.
 
+### Sửa lỗi
+
+- **Nút Cập nhật hỏi xác nhận trước.** Nút Cập nhật ở "Có gì mới" và ở Cài đặt → Thông tin hỏi xác nhận, giống thanh cập nhật.
+- **Bớt chạy ngầm.** Trang Cổng ngừng làm mới khi rời trang hoặc khi tạm dừng cập nhật, và biểu đồ RAM của mục khởi động và dịch vụ không ghi thêm khi tạm dừng.
+- **Kết thúc tiến trình kiểm tra lại ngay trước khi làm.** Ở trang Tiến trình, Cổng và đề xuất của trợ lý AI, tiến trình đã thoát hoặc PID đã được chương trình khác nhận sau khi bạn xác nhận sẽ được bỏ qua và báo lại, thay vì tác động nhầm.
+- **Gỡ cài đặt không chờ mãi.** Nếu trình gỡ cài đặt của ứng dụng không chạy được, app báo lỗi thay vì treo.
+
 ## [0.3.0] - 2026-11-25
 
 Bản đầu tiên có bộ cài và tự cập nhật, giao diện hai thứ tiếng.

@@ -3,6 +3,7 @@
 // Phần v2 (metrics, tiến trình, AI) nằm trong mock-v2.js.
 import { createV2Mock } from './mock-v2.js';
 import { createDuMock } from './mock-du.js';
+import { i18n } from './i18n.svelte.js';
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
@@ -637,9 +638,19 @@ export function createMockBackend() {
     async mcp_info() { await sleep(30); return { path: 'C:\\Users\\ADMIN\\AppData\\Local\\fomeg-windows-app\\fomeg-windows-app-mcp.exe', exists: true, embedded: true }; },
     async set_log_dir({ dir }) {
       await sleep(80);
-      if (dir && /^[a-z]:\\?$|\\windows\b|\\program files/i.test(dir)) throw 'Không lưu log vào thư mục hệ thống, Program Files hay gốc ổ đĩa. Hãy chọn một thư mục khác.';
-      settings.log_dir = dir || LOG_DEFAULT;
-      settings.log_dir_custom = !!dir;
+      const path = dir?.trim().replaceAll('/', '\\');
+      const normalized = path?.replace(/\\+/g, '\\').replace(/\\$/, '');
+      if (path && (
+        !/^[a-z]:\\[^\\]/i.test(normalized)
+        || /^c:\\(?:windows|program files(?: \(x86\))?)(?:\\|$)/i.test(normalized)
+        || /^c:\\(?:users(?:\\admin)?|programdata|system volume information|recovery|boot)$/i.test(normalized)
+      )) {
+        throw i18n.locale === 'en'
+          ? 'Choose an absolute path to a local folder outside protected locations.'
+          : 'Hãy chọn đường dẫn tuyệt đối tới thư mục cục bộ nằm ngoài các vị trí được bảo vệ.'; // i18n-ignore
+      }
+      settings.log_dir = path || LOG_DEFAULT;
+      settings.log_dir_custom = !!path;
       settings.log_path = `${settings.log_dir}\\log.txt`;
       return { ...settings };
     },
