@@ -40,12 +40,14 @@ jobs:
         with:
           components: clippy
 
-      # cache thư viện Rust đã biên dịch (profile ci, workspace ở gốc); lưu cả khi job lỗi để lần sau không build lại từ đầu
+      # cache thư viện Rust đã biên dịch (profile ci, workspace ở gốc). Chỉ main LƯU cache: PR (cả PR vào dev) đọc được cache
+      # của main, còn cache tạo trong PR thì PR khác không dùng được -> lưu ở PR chỉ tốn ~1 phút và ~650 MB / 10 GB hạn mức.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: . -> target
           shared-key: windows-ci
           cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Cài gói npm
         run: npm ci

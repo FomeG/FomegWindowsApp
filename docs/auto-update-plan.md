@@ -72,7 +72,9 @@ Build trên máy giữ nguyên (exe portable, `bundle.active: false`). CI thêm 
 - `productName` của bộ cài dùng dấu nháy cong `’` ("Vietnamese’s Ultimate W App"): script NSIS của Tauri đặt đường dẫn shortcut trong dấu nháy đơn, dấu `'` thường làm makensis lỗi ("macro NSISCOMCALL requires 4 parameter(s), passed 9"). Tên cửa sổ vẫn là tên gốc (`app.windows[].title`).
 - `mainBinaryName: fomeg-windows-app` giữ tên exe sau khi cài (named pipe của MCP kiểm tra tên tiến trình này).
 - Bộ cài NSIS bằng tiếng Anh (trong app vẫn theo ngôn ngữ người dùng chọn).
-- Thử bộ cài trên máy: đặt `TAURI_SIGNING_PRIVATE_KEY` (+ `_PASSWORD`) rồi `npm run build:setup` (bản này không có repo nhúng nên không tự cập nhật).
+- Tauri CLI ký bộ cài rồi **tự kiểm chữ ký bằng `plugins.updater.pubkey` của cấu hình**; `tauri.conf.json` để `""` nên `release.yml` ghi variable `TAURI_UPDATER_PUBKEY` vào `tauri.release.conf.json` ngay trước khi build (chỉ trên máy CI). Thiếu bước này: bộ cài build xong nhưng lệnh lỗi "failed to decode pubkey: Missing comment in public key".
+- Thử bộ cài trên máy: đặt `TAURI_SIGNING_PRIVATE_KEY` (+ `_PASSWORD`), tạm điền nội dung `.key.pub` vào `plugins.updater.pubkey` của `tauri.release.conf.json` (đừng commit), rồi `npm run build:setup` (bản này không có repo nhúng nên không tự cập nhật).
+- Cache CI: chỉ lần chạy trên `main` lưu cache Rust (PR đọc được cache của main, cache tạo trong PR thì PR khác không dùng được). Lần đầu sau khi đổi đường dẫn cache (vd. chuyển sang workspace) build từ đầu ~10 phút, các lần sau chỉ biên dịch lại crate của app.
 
 ## 5. Việc bạn tự làm một lần
 
