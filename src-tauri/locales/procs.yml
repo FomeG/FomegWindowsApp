@@ -1,0 +1,131 @@
+_version: 2
+# Tiến trình: kết thúc / khởi động lại / ưu tiên / mở vị trí. `procs.act.*` = việc đang làm, ghép vào `procs.err.access_denied` / `win_code` / `sys_code`.
+procs.err.gone:
+  vi: 'Không tìm thấy tiến trình hoặc tiến trình đã thoát.'
+  en: 'Process not found or it has already exited.'
+procs.err.critical:
+  vi: 'Không thể kết thúc tiến trình hệ thống quan trọng của Windows.'
+  en: 'Cannot end a critical Windows system process.'
+procs.err.ppl:
+  vi: 'Tiến trình được Windows bảo vệ (PPL), không thể kết thúc từ ứng dụng thường.'
+  en: 'The process is protected by Windows (PPL) and cannot be ended from a normal app.'
+procs.err.service:
+  vi: 'Đây là tiến trình hệ thống/dịch vụ – hãy khởi động lại dịch vụ ở tab Dịch vụ.'
+  en: 'This is a system/service process. Restart the service on the Services tab.'
+procs.err.still_running:
+  vi: 'Hết thời gian chờ, tiến trình vẫn đang chạy.'
+  en: 'Timed out; the process is still running.'
+procs.err.access_denied:
+  vi: '%{action}: không đủ quyền truy cập.'
+  en: '%{action}: access denied.'
+procs.err.win_code:
+  vi: '%{action} (mã lỗi Windows 0x%{code}).'
+  en: '%{action} (Windows error 0x%{code}).'
+procs.err.sys_code:
+  vi: '%{action} (mã lỗi hệ thống %{code}).'
+  en: '%{action} (system error %{code}).'
+procs.err.self:
+  vi: 'Không thể kết thúc chính tiến trình của ứng dụng.'
+  en: 'Cannot end this app''s own process.'
+procs.err.taskkill_denied:
+  vi: 'Không đủ quyền kết thúc tiến trình hoặc Windows từ chối yêu cầu (taskkill: %{code}).'
+  en: 'Not allowed to end the process, or Windows refused the request (taskkill: %{code}).'
+procs.err.read_tree:
+  vi: 'Không đọc được cây tiến trình (NTSTATUS 0x%{status}).'
+  en: 'Could not read the process tree (NTSTATUS 0x%{status}).'
+procs.err.bad_tree:
+  vi: 'Windows trả về dữ liệu cây tiến trình không hợp lệ.'
+  en: 'Windows returned invalid process tree data.'
+procs.err.read_cmdline:
+  vi: 'Không đọc được dòng lệnh (NTSTATUS 0x%{status}).'
+  en: 'Could not read the command line (NTSTATUS 0x%{status}).'
+procs.err.bad_cmdline:
+  vi: 'Tiến trình không có dòng lệnh hợp lệ để khởi động lại.'
+  en: 'The process has no valid command line to restart with.'
+procs.err.no_shell_token:
+  vi: 'Không lấy được token chưa nâng quyền của Explorer cho người dùng này.'
+  en: 'Could not get Explorer''s non-elevated token for this user.'
+procs.err.other_session:
+  vi: 'Chỉ có thể khởi động lại tiến trình trong cùng phiên đăng nhập.'
+  en: 'Only processes in the same logon session can be restarted.'
+procs.err.restart_denied:
+  vi: 'Không có quyền khởi động lại tiến trình với cùng người dùng và mức nâng quyền.'
+  en: 'Not allowed to restart the process with the same user and elevation level.'
+procs.err.cmdline_too_long:
+  vi: 'Dòng lệnh dài quá giới hạn của Windows khi khởi động bằng token Explorer.'
+  en: 'The command line exceeds the Windows limit for launching with the Explorer token.'
+procs.err.no_parent:
+  vi: 'Không xác định được thư mục chứa chương trình.'
+  en: 'Could not determine the program''s folder.'
+procs.err.bad_priority:
+  vi: 'Mức ưu tiên không hợp lệ.'
+  en: 'Invalid priority level.'
+procs.err.bad_path:
+  vi: 'Đường dẫn tệp không hợp lệ.'
+  en: 'Invalid file path.'
+procs.act.verify_critical:
+  vi: 'Không xác minh được mức độ quan trọng của tiến trình'
+  en: 'Could not verify whether the process is critical'
+procs.act.wait_exit:
+  vi: 'Không chờ được tiến trình thoát'
+  en: 'Could not wait for the process to exit'
+procs.act.open_to_kill:
+  vi: 'Không mở được tiến trình để kết thúc'
+  en: 'Could not open the process to end it'
+procs.act.read_created:
+  vi: 'Không đọc được thời điểm tạo tiến trình'
+  en: 'Could not read the process creation time'
+procs.act.read_name:
+  vi: 'Không đọc được tên tiến trình'
+  en: 'Could not read the process name'
+procs.act.kill:
+  vi: 'Không kết thúc được tiến trình'
+  en: 'Could not end the process'
+procs.act.run_taskkill:
+  vi: 'Không chạy được taskkill'
+  en: 'Could not run taskkill'
+procs.act.read_taskkill:
+  vi: 'Không đọc được kết quả taskkill'
+  en: 'Could not read the taskkill result'
+procs.act.read_root_created:
+  vi: 'Không đọc được thời điểm tạo tiến trình gốc'
+  en: 'Could not read the root process creation time'
+procs.act.open_explorer:
+  vi: 'Không mở được tiến trình Explorer'
+  en: 'Could not open the Explorer process'
+procs.act.open_explorer_token:
+  vi: 'Không mở được token Explorer'
+  en: 'Could not open the Explorer token'
+procs.act.dup_explorer_token:
+  vi: 'Không sao chép được token Explorer'
+  en: 'Could not duplicate the Explorer token'
+procs.act.read_token:
+  vi: 'Không đọc được thông tin token'
+  en: 'Could not read token information'
+procs.act.relaunch_shell:
+  vi: 'Đã kết thúc tiến trình nhưng không khởi động lại được bằng token Explorer'
+  en: 'The process was ended but could not be restarted with the Explorer token'
+procs.act.relaunch:
+  vi: 'Đã kết thúc tiến trình nhưng không khởi động lại được'
+  en: 'The process was ended but could not be restarted'
+procs.act.open_priority:
+  vi: 'Không mở được tiến trình để đổi ưu tiên'
+  en: 'Could not open the process to change its priority'
+procs.act.set_priority:
+  vi: 'Không đổi được mức ưu tiên'
+  en: 'Could not change the priority'
+procs.act.windows_dir:
+  vi: 'Không tìm thấy thư mục Windows'
+  en: 'Windows folder not found'
+procs.act.access_path:
+  vi: 'Không truy cập được đường dẫn tệp'
+  en: 'Could not access the file path'
+procs.act.open_location:
+  vi: 'Không mở được vị trí tệp trong Explorer'
+  en: 'Could not open the file location in Explorer'
+procs.act.init_com:
+  vi: 'Không khởi tạo được COM'
+  en: 'Could not initialize COM'
+procs.act.properties:
+  vi: 'Không mở được cửa sổ Thuộc tính'
+  en: 'Could not open the Properties window'

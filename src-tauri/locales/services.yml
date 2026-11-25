@@ -1,0 +1,38 @@
+_version: 2
+# Dịch vụ Windows: lỗi khi đổi kiểu khởi động / chạy / dừng.
+services.err.has_dependents:
+  vi: 'Có dịch vụ khác đang phụ thuộc vào dịch vụ này nên không dừng được.'
+  en: 'Other services depend on this service, so it cannot be stopped.'
+services.err.not_accepted:
+  vi: 'Dịch vụ không chấp nhận lệnh này.'
+  en: 'The service does not accept this command.'
+services.err.no_response:
+  vi: 'Dịch vụ không phản hồi kịp thời.'
+  en: 'The service did not respond in time.'
+services.err.already_running:
+  vi: 'Dịch vụ đang chạy rồi.'
+  en: 'The service is already running.'
+services.err.disabled:
+  vi: 'Dịch vụ đang bị tắt hẳn, hãy chuyển sang Thủ công/Tự động trước.'
+  en: 'The service is disabled. Set it to Manual or Automatic first.'
+services.err.not_found:
+  vi: 'Không tìm thấy dịch vụ.'
+  en: 'Service not found.'
+services.err.not_running:
+  vi: 'Dịch vụ chưa chạy.'
+  en: 'The service is not running.'
+services.err.dependency_failed:
+  vi: 'Dịch vụ phụ thuộc không khởi động được.'
+  en: 'A dependency service failed to start.'
+services.err.critical_change:
+  vi: 'Dịch vụ hệ thống quan trọng, app không cho đổi.'
+  en: 'Critical system service; the app does not allow changing it.'
+services.err.critical_stop:
+  vi: 'Dịch vụ hệ thống quan trọng, app không cho dừng.'
+  en: 'Critical system service; the app does not allow stopping it.'
+services.err.bad_mode:
+  vi: 'Kiểu khởi động không hợp lệ: %{mode}'
+  en: 'Invalid startup type: %{mode}'
+services.err.stopped_after_start:
+  vi: 'Dịch vụ dừng ngay sau khi khởi động.'
+  en: 'The service stopped right after starting.'

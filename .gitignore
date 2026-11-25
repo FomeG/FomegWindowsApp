@@ -1,0 +1,69 @@
+# ============================================================
+#  Vietnamese's Ultimate W App – Tauri 2 + Svelte 5 + Vite
+# ============================================================
+
+# ---------- Node / Vite (frontend) ----------
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------- Rust / Tauri (backend) ----------
+# build output (app exe, qlkd-mcp.exe, bản dev / release)
+target/
+src-tauri/target/
+mcp/target/
+# schema do tauri-build tự sinh mỗi lần build
+src-tauri/gen/schemas/
+# file sao lưu của rustfmt
+**/*.rs.bk
+# dữ liệu profiler / coverage
+*.profraw
+*.profdata
+*.pdb
+
+# ---------- Môi trường & bí mật ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+# khoá ký bản cập nhật Tauri (nếu sau này dùng updater) – *.key ở trên đã chặn
+
+# ---------- Dự án tham khảo (repo riêng của người khác, giấy phép riêng) ----------
+RustWTM/
+
+# ---------- Log & tệp tạm ----------
+*.log
+logs/
+codex/logs/
+*.tmp
+*.temp
+*.bak
+*.old
+*.orig
+*.swp
+*~
+
+# ---------- Công cụ AI / editor (cài đặt cá nhân) ----------
+.claude/settings.local.json
+.claude/worktrees/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.code-workspace
+
+# ---------- Hệ điều hành ----------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store

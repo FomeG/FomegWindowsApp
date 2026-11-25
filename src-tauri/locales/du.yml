@@ -1,0 +1,38 @@
+_version: 2
+# Trang Ổ cứng (dung lượng thư mục): lỗi quét / xoá, menu chuột phải.
+du.err.thread:
+  vi: 'Không tạo được luồng quét: %{e}'
+  en: 'Could not start the scan thread: %{e}'
+du.err.scan_ended:
+  vi: 'Lần quét này đã kết thúc hoặc đã được thay bằng lần quét khác.'
+  en: 'This scan has ended or was replaced by a newer one.'
+du.err.protected_path:
+  vi: 'Không cho phép xoá thư mục hệ thống / gốc ổ: %{p}'
+  en: 'Deleting system folders / drive roots is not allowed: %{p}'
+du.err.protected:
+  vi: 'Thư mục hệ thống / gốc ổ – không cho phép xoá'
+  en: 'System folder / drive root – deleting is not allowed'
+du.err.not_absolute:
+  vi: 'Không phải đường dẫn đầy đủ'
+  en: 'Not a full path'
+du.err.gone:
+  vi: 'Không còn tồn tại'
+  en: 'This path no longer exists.'
+du.err.not_deleted:
+  vi: 'Chưa xoá được (bị khoá hoặc không đủ quyền).'
+  en: 'Not deleted (locked or access denied).'
+du.err.open_explorer:
+  vi: 'Không mở được Explorer: %{e}'
+  en: 'Could not open Explorer: %{e}'
+du.err.menu_cancelled:
+  vi: 'Menu bị huỷ.'
+  en: 'Menu cancelled.'
+du.menu.scan:
+  vi: 'Quét thư mục này'
+  en: 'Scan this folder'
+du.menu.ask_ai:
+  vi: 'Hỏi trợ lý AI về thư mục này'
+  en: 'Ask the AI assistant about this folder'
+du.menu.copy_path:
+  vi: 'Sao chép đường dẫn'
+  en: 'Copy path'

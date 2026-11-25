@@ -1,0 +1,8 @@
+_version: 2
+# Chuỗi chung của backend. Mỗi khoá: vi (mặc định) + en. Tham số: %{ten}.
+common.unknown_error:
+  vi: Lỗi không xác định
+  en: Unknown error
+common.test_param:
+  vi: Chào %{name}
+  en: Hello %{name}

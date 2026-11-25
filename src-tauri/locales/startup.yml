@@ -1,0 +1,68 @@
+_version: 2
+# Khởi động: nguồn của mục (registry, thư mục Startup, Task, dịch vụ), lỗi quét / bật tắt.
+startup.src.run_user:
+  vi: 'Registry Run (người dùng)'
+  en: 'Registry Run (user)'
+startup.src.run_machine:
+  vi: 'Registry Run (máy)'
+  en: 'Registry Run (machine)'
+startup.src.run_machine32:
+  vi: 'Registry Run (máy, 32-bit)'
+  en: 'Registry Run (machine, 32-bit)'
+startup.src.runonce_user:
+  vi: 'Registry RunOnce (người dùng)'
+  en: 'Registry RunOnce (user)'
+startup.src.runonce_machine:
+  vi: 'Registry RunOnce (máy)'
+  en: 'Registry RunOnce (machine)'
+startup.src.policy_user:
+  vi: 'Registry Policy Run (người dùng) - ẩn'
+  en: 'Registry Policy Run (user) - hidden'
+startup.src.policy_machine:
+  vi: 'Registry Policy Run (máy) - ẩn'
+  en: 'Registry Policy Run (machine) - hidden'
+startup.src.folder_user:
+  vi: 'Thư mục Startup (người dùng)'
+  en: 'Startup folder (user)'
+startup.src.folder_all:
+  vi: 'Thư mục Startup (mọi người)'
+  en: 'Startup folder (all users)'
+startup.src.task_logon:
+  vi: 'Task - khi đăng nhập/khởi động'
+  en: 'Task - at logon/startup'
+startup.src.task_schedule:
+  vi: 'Task - theo lịch'
+  en: 'Task - scheduled'
+startup.src.service:
+  vi: 'Dịch vụ'
+  en: 'Service'
+startup.err.bad_reg_key:
+  vi: 'Khoá registry không hợp lệ: %{path}'
+  en: 'Invalid registry key: %{path}'
+startup.err.kind_unsupported:
+  vi: 'Loại mục này chưa hỗ trợ.'
+  en: 'This item type is not supported yet.'
+startup.scan.err_registry:
+  vi: 'Lỗi khi quét registry.'
+  en: 'Error while scanning the registry.'
+startup.scan.err_folders:
+  vi: 'Lỗi khi quét thư mục Startup.'
+  en: 'Error while scanning the Startup folders.'
+startup.scan.err_tasks:
+  vi: 'Lỗi khi quét Scheduled Task.'
+  en: 'Error while scanning scheduled tasks.'
+startup.scan.err_services:
+  vi: 'Lỗi khi quét dịch vụ.'
+  en: 'Error while scanning services.'
+startup.scan.warn_services:
+  vi: 'Dịch vụ: %{e}'
+  en: 'Services: %{e}'
+startup.scan.t_folders:
+  vi: 'Thư mục Startup'
+  en: 'Startup folders'
+startup.scan.t_services:
+  vi: 'Dịch vụ'
+  en: 'Services'
+startup.scan.t_publisher:
+  vi: 'Nhà phát hành'
+  en: 'Publishers'

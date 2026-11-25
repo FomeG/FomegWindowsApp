@@ -1,0 +1,104 @@
+_version: 2
+# Ứng dụng đã cài (gỡ / sửa đổi) và thư mục liên quan / còn sót lại.
+apps.err.gone:
+  vi: 'Không tìm thấy ứng dụng này nữa.'
+  en: 'This app can no longer be found.'
+apps.err.gone_maybe_removed:
+  vi: 'Không tìm thấy ứng dụng này nữa (có thể đã được gỡ).'
+  en: 'This app can no longer be found (it may have been uninstalled).'
+apps.err.uninstalling_this:
+  vi: 'Ứng dụng này đang được gỡ.'
+  en: 'This app is already being uninstalled.'
+apps.err.uninstalling_other:
+  vi: 'Đang gỡ một ứng dụng khác, đợi xong rồi gỡ tiếp nhé.'
+  en: 'Another app is being uninstalled. Wait for it to finish first.'
+apps.err.cannot_uninstall:
+  vi: 'Ứng dụng này không cho gỡ từ đây.'
+  en: 'This app cannot be uninstalled from here.'
+apps.err.win_code:
+  vi: 'Windows báo lỗi 0x%{code}'
+  en: 'Windows reported error 0x%{code}'
+apps.err.no_modify:
+  vi: 'Ứng dụng này không có chức năng sửa đổi.'
+  en: 'This app has no Modify option.'
+apps.err.bad_id:
+  vi: 'id sai'
+  en: 'invalid id'
+apps.err.read_key:
+  vi: 'Không đọc được khoá'
+  en: 'Could not read the registry key'
+apps.err.no_uninstall_cmd:
+  vi: 'Ứng dụng không khai báo lệnh gỡ.'
+  en: 'The app does not provide an uninstall command.'
+apps.err.run_uninstaller:
+  vi: 'Không chạy được trình gỡ: %{e}'
+  en: 'Could not run the uninstaller: %{e}'
+apps.err.no_folder:
+  vi: 'Ứng dụng không khai báo thư mục cài đặt.'
+  en: 'The app does not declare an install folder.'
+apps.err.unsupported:
+  vi: 'Không hỗ trợ.'
+  en: 'Not supported.'
+leftovers.area.profile:
+  vi: 'Hồ sơ người dùng'
+  en: 'User profile'
+leftovers.area.install:
+  vi: 'Thư mục cài đặt'
+  en: 'Install folder'
+leftovers.area.old_install:
+  vi: 'Thư mục cài đặt cũ'
+  en: 'Old install folder'
+leftovers.area.store_data:
+  vi: 'Dữ liệu app Store'
+  en: 'Store app data'
+leftovers.reason.name_match:
+  vi: 'Tên thư mục khớp với %{name}'
+  en: 'Folder name matches %{name}'
+leftovers.reason.publisher_folder:
+  vi: 'Thư mục của nhà phát hành %{publisher}'
+  en: 'Folder of publisher %{publisher}'
+leftovers.reason.in_publisher_folder:
+  vi: 'Trong thư mục của nhà phát hành %{publisher}'
+  en: 'Inside the folder of publisher %{publisher}'
+leftovers.reason.store_install:
+  vi: 'Windows tự xoá khi gỡ app Store'
+  en: 'Windows removes it when the Store app is uninstalled'
+leftovers.reason.install_guessed:
+  vi: 'Thư mục cài đặt (suy ra từ vị trí trình gỡ) – trình gỡ thường tự xoá, còn sót thì xoá nốt'
+  en: 'Install folder (guessed from the uninstaller location) – the uninstaller usually removes it; anything left is deleted afterwards'
+leftovers.reason.install:
+  vi: 'Trình gỡ thường tự xoá; nếu còn sót sẽ xoá nốt'
+  en: 'The uninstaller usually removes it; anything left is deleted afterwards'
+leftovers.reason.store_data:
+  vi: 'Windows tự xoá cùng app'
+  en: 'Windows removes it together with the app'
+leftovers.reason.old_install:
+  vi: 'Thư mục cài đặt vẫn còn sau khi gỡ'
+  en: 'The install folder is still there after uninstalling'
+leftovers.reason.removed_on:
+  vi: '%{reason} (đã gỡ %{date})'
+  en: '%{reason} (uninstalled %{date})'
+leftovers.reason.orphan_store_data:
+  vi: 'Dữ liệu của app Store không còn cài cho tài khoản này'
+  en: 'Data of a Store app no longer installed for this account'
+leftovers.reason.wa_deleted:
+  vi: 'Gói đã gỡ, đang chờ Windows xoá (thường sau khi khởi động lại)'
+  en: 'Removed package waiting for Windows to delete it (usually after a restart)'
+leftovers.reason.wa_other_users:
+  vi: 'Chỉ còn cài cho tài khoản khác (hoặc tài khoản đã xoá) – gỡ sẽ gỡ cho mọi tài khoản'
+  en: 'Installed only for other (or deleted) accounts – removing it removes it for all accounts'
+leftovers.reason.wa_provisioned:
+  vi: 'Cài sẵn cho tài khoản mới (provisioned) – để Windows quản lý'
+  en: 'Preinstalled for new accounts (provisioned) – leave it to Windows'
+leftovers.reason.wa_old_version:
+  vi: 'Bản cũ của app đang dùng – Windows tự dọn sau khi app khởi động lại'
+  en: 'Old version of an app in use – Windows cleans it up after the app restarts'
+leftovers.reason.wa_orphan:
+  vi: 'Không còn gói nào dùng – tác vụ dọn của Windows sẽ xoá; không nên xoá tay'
+  en: 'No package uses it – a Windows cleanup task will delete it; do not delete it by hand'
+leftovers.err.package_mine:
+  vi: 'Gói này đang cài cho tài khoản của bạn – gỡ ở danh sách ứng dụng.'
+  en: 'This package is installed for your account – uninstall it from the app list.'
+leftovers.err.package_gone:
+  vi: 'Không còn gói này.'
+  en: 'This package no longer exists.'

@@ -1,0 +1,11 @@
+_version: 2
+# Lỗi chung của backend (dùng ở nhiều nơi).
+errors.need_admin:
+  vi: 'Không đủ quyền (cần chạy app với quyền Admin).'
+  en: 'Access denied (run the app as administrator).'
+errors.code:
+  vi: 'Lỗi 0x%{code}'
+  en: 'Error 0x%{code}'
+errors.lock:
+  vi: 'lỗi khoá'
+  en: 'lock error'

@@ -1,0 +1,113 @@
+_version: 2
+# Trợ lý AI: lỗi cấu hình / API key / HTTP / luồng trả lời hiện cho người dùng (KHÔNG phải lời nhắc hệ thống).
+ai.err.bad_provider:
+  vi: 'Nhà cung cấp AI không hợp lệ.'
+  en: 'Invalid AI provider.'
+ai.err.missing_key:
+  vi: 'Chưa có API key %{name}. Hãy thêm key trong phần cài đặt.'
+  en: 'No %{name} API key yet. Add one in Settings.'
+ai.err.saved_key_invalid:
+  vi: 'API key đã lưu không hợp lệ.'
+  en: 'The saved API key is invalid.'
+ai.err.invalid_config:
+  vi: 'Cấu hình AI không hợp lệ.'
+  en: 'Invalid AI configuration.'
+ai.err.read_config:
+  vi: 'Không thể đọc cấu hình AI.'
+  en: 'Could not read the AI configuration.'
+ai.err.bad_effort:
+  vi: 'Mức suy luận phải là low, medium, high, xhigh hoặc max.'
+  en: 'Effort must be low, medium, high, xhigh or max.'
+ai.err.make_config:
+  vi: 'Không thể tạo cấu hình AI.'
+  en: 'Could not create the AI configuration.'
+ai.err.no_config_dir:
+  vi: 'Không tìm thấy thư mục cấu hình AI.'
+  en: 'AI configuration folder not found.'
+ai.err.make_config_dir:
+  vi: 'Không thể tạo thư mục cấu hình AI.'
+  en: 'Could not create the AI configuration folder.'
+ai.err.make_config_file:
+  vi: 'Không thể tạo tệp cấu hình AI.'
+  en: 'Could not create the AI configuration file.'
+ai.err.save_config:
+  vi: 'Không thể lưu cấu hình AI.'
+  en: 'Could not save the AI configuration.'
+ai.err.no_model:
+  vi: 'Chưa chọn model cho %{provider}.'
+  en: 'No model selected for %{provider}.'
+ai.err.no_localappdata:
+  vi: 'Không tìm thấy thư mục LOCALAPPDATA.'
+  en: 'LOCALAPPDATA folder not found.'
+ai.err.key_too_long:
+  vi: 'API key quá dài.'
+  en: 'The API key is too long.'
+ai.err.dpapi_protect:
+  vi: 'Windows không thể mã hóa API key.'
+  en: 'Windows could not encrypt the API key.'
+ai.err.dpapi_unprotect:
+  vi: 'Windows không thể giải mã API key đã lưu.'
+  en: 'Windows could not decrypt the saved API key.'
+ai.err.busy:
+  vi: 'Cuộc trò chuyện đang có một lượt trả lời, hãy đợi hoặc bấm Dừng.'
+  en: 'This chat is already answering. Wait or press Stop.'
+ai.err.refused:
+  vi: 'Claude từ chối trả lời yêu cầu này.'
+  en: 'Claude declined to answer this request.'
+ai.err.bad_key:
+  vi: 'API key không hợp lệ.'
+  en: 'Invalid API key.'
+ai.err.invalid_url:
+  vi: 'URL API không hợp lệ. Hãy dùng địa chỉ bắt đầu bằng http:// hoặc https://.'
+  en: 'Invalid API URL. Use an address starting with http:// or https://.'
+ai.err.no_custom_url:
+  vi: 'Chưa nhập URL API cho Custom.'
+  en: 'No API URL entered for Custom.'
+ai.redacted:
+  vi: '[đã ẩn]'
+  en: '[hidden]'
+ai.err.bad_models:
+  vi: 'Danh sách model không hợp lệ.'
+  en: 'Invalid model list.'
+ai.err.make_request_claude:
+  vi: 'Không thể tạo yêu cầu Claude.'
+  en: 'Could not build the Claude request.'
+ai.err.make_request:
+  vi: 'Không thể tạo yêu cầu AI.'
+  en: 'Could not build the AI request.'
+ai.err.network:
+  vi: 'Không kết nối được tới %{host}.'
+  en: 'Could not connect to %{host}.'
+ai.err.forbidden:
+  vi: 'API key không hợp lệ hoặc không có quyền truy cập.'
+  en: 'Invalid API key or no access.'
+ai.err.not_found:
+  vi: 'Không tìm thấy địa chỉ API hoặc model. Hãy kiểm tra URL và tên model.'
+  en: 'API address or model not found. Check the URL and model name.'
+ai.err.rate_limited:
+  vi: 'Bị giới hạn tốc độ, thử lại sau ít phút.'
+  en: 'Rate limited. Try again in a few minutes.'
+ai.err.overloaded:
+  vi: 'Máy chủ %{provider} đang quá tải/lỗi, thử lại sau.'
+  en: 'The %{provider} server is overloaded or failing. Try again later.'
+ai.err.http:
+  vi: '%{provider} trả về lỗi HTTP %{status}.'
+  en: '%{provider} returned HTTP error %{status}.'
+ai.err.claude_failed:
+  vi: 'Claude báo lỗi khi trả lời.'
+  en: 'Claude reported an error while answering.'
+ai.err.invalid_stream_claude:
+  vi: 'Dữ liệu trả lời từ Claude không hợp lệ.'
+  en: 'Invalid response data from Claude.'
+ai.err.invalid_stream:
+  vi: 'Dữ liệu trả lời từ máy chủ AI không hợp lệ.'
+  en: 'Invalid response data from the AI server.'
+ai.err.claude_ended:
+  vi: 'Kết nối Claude kết thúc trước khi trả lời xong.'
+  en: 'The Claude connection closed before the answer was complete.'
+ai.err.stream_ended:
+  vi: 'Kết nối máy chủ AI kết thúc trước khi trả lời xong.'
+  en: 'The AI server connection closed before the answer was complete.'
+ai.err.server_failed:
+  vi: 'Máy chủ AI báo lỗi khi trả lời.'
+  en: 'The AI server reported an error while answering.'

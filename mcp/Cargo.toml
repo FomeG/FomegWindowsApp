@@ -1,0 +1,24 @@
+# fomeg-windows-app-mcp: MCP server CHỈ ĐỌC (stdio) cho Claude Code / Claude Desktop / coding agent khác.
+# Crate riêng để exe KHÔNG nhúng manifest đòi Admin của app (tauri-build gắn manifest vào mọi binary của gói src-tauri),
+# nên agent khởi chạy được mà không bật UAC. Mã dùng chung: fomeg_windows_app_lib::core::{agent_tools, mcp}.
+[package]
+name = "fomeg-windows-app-mcp"
+version = "0.3.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "fomeg-windows-app-mcp"
+path = "src/main.rs"
+
+[dependencies]
+fomeg-windows-app = { path = "../src-tauri" }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[workspace]

@@ -1,0 +1,35 @@
+_version: 2
+# Lệnh chung của app (commands.rs): cài đặt, log, cửa sổ, công cụ; tra cứu tiến trình cho popup "Kết thúc".
+app.err.bad_action:
+  vi: 'Thao tác không hợp lệ: %{action}'
+  en: 'Invalid action: %{action}'
+app.err.no_log_dir:
+  vi: 'Không tìm thấy thư mục log.'
+  en: 'Log folder not found.'
+app.err.bad_interval:
+  vi: 'Chu kỳ cập nhật không hợp lệ.'
+  en: 'Invalid update interval.'
+app.err.bad_idle_interval:
+  vi: 'Chu kỳ khi ẩn không hợp lệ.'
+  en: 'Invalid background interval.'
+app.err.relaunch_admin:
+  vi: 'Không mở lại được bằng quyền Admin: %{e}'
+  en: 'Could not restart as administrator: %{e}'
+app.err.no_window:
+  vi: 'Không lấy được cửa sổ: %{e}'
+  en: 'Could not get the window: %{e}'
+app.err.bad_tool:
+  vi: 'Công cụ không được hỗ trợ'
+  en: 'Unsupported tool'
+procs.lookup.not_found:
+  vi: 'Không tìm thấy (đã thoát?)'
+  en: 'Not found (already exited?)'
+procs.lookup.critical:
+  vi: 'Tiến trình hệ thống quan trọng của Windows'
+  en: 'Critical Windows system process'
+procs.lookup.self:
+  vi: 'Đây là chính ứng dụng này'
+  en: 'This is this app itself'
+procs.lookup.svchost:
+  vi: 'Chứa dịch vụ Windows – hãy dừng dịch vụ ở trang Dịch vụ'
+  en: 'Hosts Windows services – stop the service on the Services page'

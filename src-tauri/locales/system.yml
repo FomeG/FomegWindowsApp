@@ -1,0 +1,38 @@
+_version: 2
+# Hệ thống: đo hiệu năng, cổng, Shell (xoá, mở, chọn thư mục).
+metrics.disk_name:
+  vi: 'Đĩa %{number}'
+  en: 'Disk %{number}'
+ports.err.read_table:
+  vi: 'Không đọc được bảng kết nối (mã lỗi %{rc})'
+  en: 'Could not read the connection table (error %{rc})'
+ports.err.table_too_big:
+  vi: 'Bảng kết nối quá lớn'
+  en: 'The connection table is too large'
+ports.err.table_changing:
+  vi: 'Bảng kết nối thay đổi liên tục, thử lại sau'
+  en: 'The connection table keeps changing, try again later'
+ports.err.bad_port:
+  vi: 'Cổng không hợp lệ'
+  en: 'Invalid port'
+shell.err.delete_denied:
+  vi: 'Không đủ quyền để xoá (thử chạy app với quyền Quản trị).'
+  en: 'Access denied while deleting (try running the app as administrator).'
+shell.err.in_use:
+  vi: 'Tệp đang được một chương trình khác sử dụng.'
+  en: 'The file is in use by another program.'
+shell.err.not_found:
+  vi: 'Không tìm thấy đường dẫn (có thể đã bị xoá).'
+  en: 'Path not found (it may have been deleted).'
+shell.err.delete_code:
+  vi: 'Windows báo lỗi khi xoá (mã %{code}).'
+  en: 'Windows reported an error while deleting (code %{code}).'
+shell.pick_folder_title:
+  vi: 'Chọn thư mục để quét'
+  en: 'Choose a folder to scan'
+shell.err.open:
+  vi: 'Không mở được %{target}: %{e}'
+  en: 'Could not open %{target}: %{e}'
+shell.err.open_code:
+  vi: 'Không mở được %{target} (mã %{code})'
+  en: 'Could not open %{target} (code %{code})'

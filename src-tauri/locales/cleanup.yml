@@ -1,0 +1,101 @@
+_version: 2
+# Trang Dọn dẹp: tên + ghi chú của vị trí cố định (`cleanup.fixed.<id>`), ghi chú nhóm cache, lỗi quét / dọn.
+cleanup.fixed.user_temp.name:
+  vi: 'Tệp tạm của bạn'
+  en: 'Your temporary files'
+cleanup.fixed.user_temp.note:
+  vi: 'Thư mục %TEMP%: tệp tạm của chương trình và bộ cài. Windows và ứng dụng tự tạo lại khi cần.'
+  en: 'The %TEMP% folder: temporary files of programs and installers. Windows and apps recreate them when needed.'
+cleanup.fixed.windows_temp.name:
+  vi: 'Tệp tạm của Windows'
+  en: 'Windows temporary files'
+cleanup.fixed.windows_temp.note:
+  vi: 'Windows\Temp: tệp tạm của Windows, dịch vụ và bộ cài chạy quyền hệ thống.'
+  en: 'Windows\Temp: temporary files of Windows, services and installers running as SYSTEM.'
+cleanup.fixed.error_reports.name:
+  vi: 'Báo cáo lỗi Windows'
+  en: 'Windows error reports'
+cleanup.fixed.error_reports.note:
+  vi: 'Báo cáo sự cố đã gửi hoặc đang chờ gửi cho Microsoft. Máy không cần chúng để chạy.'
+  en: 'Problem reports sent or waiting to be sent to Microsoft. Windows does not need them to run.'
+cleanup.fixed.crash_dumps.name:
+  vi: 'Tệp dump khi gặp sự cố'
+  en: 'Crash dump files'
+cleanup.fixed.crash_dumps.note:
+  vi: 'Ảnh bộ nhớ lúc chương trình hoặc Windows bị lỗi. Chỉ cần khi gửi cho kỹ thuật viên để tìm nguyên nhân.'
+  en: 'Memory snapshots taken when a program or Windows crashed. Only needed if you send them to a technician to find the cause.'
+cleanup.fixed.windows_update.name:
+  vi: 'Bản cập nhật Windows đã tải'
+  en: 'Downloaded Windows updates'
+cleanup.fixed.windows_update.note:
+  vi: 'Tệp cài cập nhật đã tải về (SoftwareDistribution\Download). Windows tự tải lại nếu còn cần. Đừng dọn khi Windows đang cập nhật.'
+  en: 'Downloaded update installers (SoftwareDistribution\Download). Windows downloads them again if still needed. Do not clean while Windows is updating.'
+cleanup.fixed.delivery_opt.name:
+  vi: 'Bộ nhớ đệm Tối ưu hoá phân phối'
+  en: 'Delivery Optimization cache'
+cleanup.fixed.delivery_opt.note:
+  vi: 'Bản cập nhật Windows/Store lưu lại để chia sẻ cho máy khác trong mạng. Xoá an toàn.'
+  en: 'Windows/Store updates kept to share with other PCs on the network. Safe to delete.'
+cleanup.fixed.shader_cache.name:
+  vi: 'Cache shader đồ hoạ'
+  en: 'Graphics shader cache'
+cleanup.fixed.shader_cache.note:
+  vi: 'Shader DirectX / NVIDIA / AMD đã biên dịch. Game và ứng dụng tự tạo lại; lần mở đầu có thể hơi giật.'
+  en: 'Compiled DirectX / NVIDIA / AMD shaders. Games and apps rebuild them; the first launch may stutter a little.'
+cleanup.fixed.inet_cache.name:
+  vi: 'Tệp Internet tạm'
+  en: 'Temporary Internet files'
+cleanup.fixed.inet_cache.note:
+  vi: 'Cache của các thành phần web cũ trong Windows (INetCache). Tự tạo lại.'
+  en: 'Cache of legacy web components in Windows (INetCache). Recreated automatically.'
+cleanup.recycle.name:
+  vi: 'Thùng rác'
+  en: 'Recycle Bin'
+cleanup.recycle.note:
+  vi: 'Các tệp bạn đã xoá vào Thùng rác (mọi ổ). Dọn là mất hẳn, không khôi phục được.'
+  en: 'Files you deleted to the Recycle Bin (all drives). Cleaning removes them for good; they cannot be restored.'
+cleanup.cache_note.browser:
+  vi: 'Cache trình duyệt (ảnh, script, video của trang web đã tải). Không mất mật khẩu, lịch sử hay dấu trang. Đóng trình duyệt trước để dọn được nhiều hơn.'
+  en: 'Browser cache (images, scripts, videos of visited pages). Passwords, history and bookmarks are kept. Close the browser first to clean more.'
+cleanup.cache_note.dot_cache:
+  vi: 'Thư mục cache chung của nhiều công cụ; có thể chứa mô hình AI đã tải (Hugging Face, LM Studio…) rất lớn. Xoá thì lần dùng sau phải tải lại.'
+  en: 'Shared cache folder of many tools; it may hold very large downloaded AI models (Hugging Face, LM Studio…). If deleted, they must be downloaded again.'
+cleanup.cache_note.dev:
+  vi: 'Cache của công cụ lập trình (gói, bản build đã tải). Xoá an toàn nhưng lần build / cài sau phải tải lại, có thể mất thời gian và dung lượng mạng.'
+  en: 'Developer tool cache (downloaded packages, builds). Safe to delete, but the next build / install downloads them again, which can take time and bandwidth.'
+cleanup.cache_note.app:
+  vi: 'Thư mục cache của ứng dụng (Cache, Code Cache, GPUCache…). Ứng dụng tự tạo lại; lần mở đầu có thể chậm hơn một chút. Tệp đang dùng được bỏ qua.'
+  en: 'App cache folders (Cache, Code Cache, GPUCache…). Apps recreate them; the first launch may be a little slower. Files in use are skipped.'
+cleanup.err.busy:
+  vi: 'Đang có một lượt quét hoặc dọn dẹp khác.'
+  en: 'Another scan or cleanup is already running.'
+cleanup.err.stale:
+  vi: 'Kết quả quét đã cũ. Hãy quét lại trước khi dọn.'
+  en: 'The scan results are out of date. Scan again before cleaning.'
+cleanup.err.none_selected:
+  vi: 'Chưa chọn mục nào để dọn.'
+  en: 'No items selected to clean.'
+cleanup.err.need_admin:
+  vi: 'Cần chạy ứng dụng bằng quyền Admin.'
+  en: 'Run the app as administrator.'
+cleanup.err.read_recycle:
+  vi: 'Không đọc được Thùng rác.'
+  en: 'Could not read the Recycle Bin.'
+cleanup.err.empty_recycle:
+  vi: 'Windows không cho dọn Thùng rác lúc này.'
+  en: 'Windows does not allow emptying the Recycle Bin right now.'
+cleanup.err.partial_read:
+  vi: 'Không đọc được một phần vị trí này.'
+  en: 'Part of this location could not be read.'
+cleanup.err.protected:
+  vi: 'Vị trí được bảo vệ, không dọn.'
+  en: 'Protected location, not cleaned.'
+cleanup.err.open_dir:
+  vi: 'Không mở được thư mục.'
+  en: 'Could not open the folder.'
+cleanup.err.is_link:
+  vi: 'Thư mục là liên kết, bỏ qua để an toàn.'
+  en: 'The folder is a link; skipped for safety.'
+cleanup.err.via_link:
+  vi: 'Đường dẫn đi qua liên kết, bỏ qua để an toàn.'
+  en: 'The path goes through a link; skipped for safety.'

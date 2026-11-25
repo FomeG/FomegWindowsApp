@@ -1,0 +1,21 @@
+{
+  "name": "fomeg-windows-app",
+  "private": true,
+  "version": "0.3.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "tauri": "tauri",
+    "build:mcp": "cargo build --release --manifest-path mcp/Cargo.toml --target-dir src-tauri/target"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.5"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tauri-apps/cli": "^2.12.6",
+    "svelte": "^5.59.1",
+    "vite": "^8.3.8"
+  }
+}
