@@ -20,14 +20,15 @@ Trạng thái: **đã làm xong** (code + CI). Còn các bước một lần ở
 ## 2. Luồng nhánh
 
 ```
-dev  ──(push: CI)──►  PR dev → main  ──(PR: CI)──►  merge vào main
+dev (push: không chạy gì)  ──►  PR dev → main  ──(PR: CI)──►  merge vào main
                                                     │
                                   version trong package.json đã có Release?
                                      ├─ rồi  → không làm gì (merge sửa chữ, tài liệu… không làm phiền người dùng)
                                      └─ chưa → CI lần nữa → build bộ cài có chữ ký → Release v<version> → app tự báo
 ```
 
-- Làm việc trên `dev`. Mỗi push lên `dev` và mỗi PR vào `main`/`dev` chạy **CI** (`.github/workflows/ci.yml`): kiểm tra đa ngôn ngữ, build giao diện, `cargo clippy -D warnings`, `cargo test --lib`, build MCP.
+- Làm việc trên `dev`; push lên `dev` **không** chạy CI (đỡ chờ). Trước khi push có thể tự kiểm tra nhanh trên máy: `npm run check:i18n`, `npm run build`, `cargo clippy --release` (trong `src-tauri`).
+- **CI** (`.github/workflows/ci.yml`) chạy khi mở / cập nhật PR vào `main` (và PR vào `dev` của Dependabot), hoặc bấm tay ở tab Actions: kiểm tra đa ngôn ngữ, build giao diện, `cargo clippy -D warnings`, `cargo test --lib`, build MCP. Lần đầu khoảng 15–25 phút (chưa có cache), sau đó 5–10 phút.
 - Muốn phát hành: trên `dev` chạy `npm run bump 0.3.1` (hoặc `patch` / `minor` / `major`), commit, mở PR `dev → main`, merge.
 - **Release** (`.github/workflows/release.yml`) chạy khi `main` thay đổi: nếu chưa có Release `v<version>` thì chạy lại CI rồi build và phát hành; có rồi thì bỏ qua. Có thể chạy tay ở tab Actions (`workflow_dispatch`).
 - Nên bật **branch protection** cho `main` (Settings → Branches): bắt buộc PR + CI xanh (`Build + lint + test (Windows)`), cấm push thẳng.

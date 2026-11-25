@@ -1,21 +1,19 @@
-# Kiểm tra: mọi push lên dev, mọi PR vào main / dev, và được release.yml gọi lại trước khi phát hành.
-# Không phát hành gì. Chạy trên Windows vì app chỉ build được trên Windows (Windows API, manifest Admin).
+# Kiểm tra trước khi vào main: chạy khi mở / cập nhật PR vào main (và PR vào dev, vd. của Dependabot), khi release.yml
+# gọi lại trước lúc phát hành, hoặc bấm tay ở tab Actions. Push lên dev KHÔNG chạy (đỡ chờ; tự kiểm tra trên máy:
+# npm run check:i18n, npm run build, cargo clippy). Không phát hành gì. Chạy trên Windows vì app chỉ build được trên Windows.
+# Không lọc theo đường dẫn: nếu bật branch protection bắt buộc CI xanh, PR chỉ sửa tài liệu vẫn có kết quả CI để merge.
 name: CI
 
 on:
-  push:
-    branches: [dev]
-    paths-ignore: ['**.md', 'docs/**', 'screenshots/**', 'codex/**', '.claude/**']
   pull_request:
     branches: [main, dev]
-    paths-ignore: ['**.md', 'docs/**', 'screenshots/**', 'codex/**', '.claude/**']
   workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# push mới lên cùng nhánh / PR -> huỷ lần chạy cũ. Khi release.yml gọi, github.workflow là 'Release' nên không đụng nhau.
+# PR được push thêm commit -> huỷ lần chạy cũ. Khi release.yml gọi, github.workflow là 'Release' nên không đụng nhau.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.workflow == 'CI' }}
