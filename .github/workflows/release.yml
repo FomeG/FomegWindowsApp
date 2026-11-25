@@ -1,6 +1,7 @@
-# Phát hành: khi main có version mới (package.json) mà chưa có Release v<version> -> chạy CI, build bộ cài NSIS có
+# Phát hành: khi main có version mới (package.json) mà chưa có Release v<version> -> build bộ cài NSIS có
 # chữ ký cập nhật, tạo GitHub Release kèm setup.exe + .sig + latest.json. App đã cài tự thấy bản mới (src-tauri/src/update.rs).
-# Merge không đổi version (sửa chữ, tài liệu…) -> không phát hành gì. Xem docs/auto-update-plan.md.
+# Merge không đổi version (sửa chữ, tài liệu…) -> không phát hành gì. Code đã được CI kiểm tra ở PR (bật branch protection
+# bắt buộc CI xanh cho main), nên ở đây không chạy lại CI để khỏi mất thêm 10–20 phút. Xem docs/auto-update-plan.md.
 name: Release
 
 on:
@@ -44,15 +45,9 @@ jobs:
             echo "::notice::Sẽ phát hành v$ver."
           fi
 
-  ci:
-    name: CI
-    needs: version
-    if: needs.version.outputs.release == 'true'
-    uses: ./.github/workflows/ci.yml
-
   release:
     name: Build + phát hành v${{ needs.version.outputs.version }}
-    needs: [version, ci]
+    needs: version
     if: needs.version.outputs.release == 'true'
     runs-on: windows-latest
     timeout-minutes: 60
@@ -81,6 +76,7 @@ jobs:
         with:
           workspaces: src-tauri -> target
           shared-key: windows-release
+          cache-on-failure: true
 
       - name: Cài gói npm
         run: npm ci

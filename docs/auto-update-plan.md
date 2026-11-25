@@ -24,13 +24,13 @@ dev (push: không chạy gì)  ──►  PR dev → main  ──(PR: CI)──�
                                                     │
                                   version trong package.json đã có Release?
                                      ├─ rồi  → không làm gì (merge sửa chữ, tài liệu… không làm phiền người dùng)
-                                     └─ chưa → CI lần nữa → build bộ cài có chữ ký → Release v<version> → app tự báo
+                                     └─ chưa → build bộ cài có chữ ký → Release v<version> → app tự báo
 ```
 
 - Làm việc trên `dev`; push lên `dev` **không** chạy CI (đỡ chờ). Trước khi push có thể tự kiểm tra nhanh trên máy: `npm run check:i18n`, `npm run build`, `cargo clippy --release` (trong `src-tauri`).
-- **CI** (`.github/workflows/ci.yml`) chạy khi mở / cập nhật PR vào `main` (và PR vào `dev` của Dependabot), hoặc bấm tay ở tab Actions: kiểm tra đa ngôn ngữ, build giao diện, `cargo clippy -D warnings`, `cargo test --lib`, build MCP. Lần đầu khoảng 15–25 phút (chưa có cache), sau đó 5–10 phút.
+- **CI** (`.github/workflows/ci.yml`) chạy khi mở / cập nhật PR vào `main` (và PR vào `dev` của Dependabot), sau khi merge vào `main` (chỉ để lưu cache cho các PR sau, không ai phải chờ), hoặc bấm tay ở tab Actions: kiểm tra đa ngôn ngữ, build giao diện, `cargo test` + `cargo clippy -D warnings` với profile `ci` (= release bỏ LTO, nhanh hơn nhiều), kiểm tra Cargo.lock của MCP. Lần đầu khoảng 10–15 phút (chưa có cache), sau đó vài phút.
 - Muốn phát hành: trên `dev` chạy `npm run bump 0.3.1` (hoặc `patch` / `minor` / `major`), commit, mở PR `dev → main`, merge.
-- **Release** (`.github/workflows/release.yml`) chạy khi `main` thay đổi: nếu chưa có Release `v<version>` thì chạy lại CI rồi build và phát hành; có rồi thì bỏ qua. Có thể chạy tay ở tab Actions (`workflow_dispatch`).
+- **Release** (`.github/workflows/release.yml`) chạy khi `main` thay đổi: nếu chưa có Release `v<version>` thì build và phát hành (không chạy lại CI: code đã qua CI ở PR, nên bật branch protection bắt buộc CI xanh); có rồi thì bỏ qua. Có thể chạy tay ở tab Actions (`workflow_dispatch`).
 - Nên bật **branch protection** cho `main` (Settings → Branches): bắt buộc PR + CI xanh (`Build + lint + test (Windows)`), cấm push thẳng.
 
 ## 3. Người dùng thấy gì
