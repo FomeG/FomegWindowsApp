@@ -18,7 +18,7 @@ serde_json = "1"
 winreg = "0.55"
 chrono = "0.4"
 ureq = "3"
-rust-i18n = "3"
+rust-i18n = "4"
 tauri-plugin-updater = "2"
 
 [dependencies.windows]
