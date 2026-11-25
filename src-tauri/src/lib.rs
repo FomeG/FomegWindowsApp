@@ -7,6 +7,7 @@ rust_i18n::i18n!("locales", fallback = "vi");
 mod commands;
 mod monitor;
 mod state;
+mod update;
 
 use std::sync::Arc;
 
@@ -47,7 +48,9 @@ pub fn run(mcp_exe: &'static [u8]) {
     crate::core::proc_actions::enable_debug_privilege();
     let st = Arc::new(state::AppState::new());
     tauri::Builder::default()
+        .plugin(update::plugin())
         .manage(st.clone())
+        .manage(update::Pending::default())
         .setup(move |app| {
             monitor::spawn(app.handle().clone(), st.clone());
             // Agent bên ngoài (fomeg-windows-app-mcp) hỏi dữ liệu sống của app qua named pipe – chỉ đọc. Kèm giải MCP nhúng ra đĩa.
@@ -65,6 +68,9 @@ pub fn run(mcp_exe: &'static [u8]) {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            update::update_info,
+            update::update_check,
+            update::update_install,
             commands::scan,
             commands::toggle_items,
             commands::service_set_mode,

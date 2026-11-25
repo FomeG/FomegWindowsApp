@@ -1,0 +1,22 @@
+// en – auto update (UpdateBar, update.svelte.js, Settings → About). Keys 'update.xxx'.
+export default {
+  'update.bar.available': 'Version {v} is available (you have {cur})',
+  'update.bar.notes': "What's new",
+  'update.bar.downloading': 'Downloading update {got} / {total}',
+  'update.bar.downloading_unknown': 'Downloading update {got}',
+  'update.bar.installing': 'Installing {v}… The app will close and reopen.',
+  'update.btn.skip': 'Skip this version',
+  'update.btn.later': 'Later',
+  'update.btn.install': 'Update',
+  'update.confirm.title': 'Update to {v}?',
+  'update.confirm.message': 'The app will download the new version, close, install it and reopen (Windows asks for admin rights as on every launch). Anything still running (cleanup, uninstall, an assistant reply) stops midway.',
+  'update.toast.latest': "You're on the latest version ({v})",
+  'update.toast.check_failed': 'Could not check for updates',
+  'update.toast.install_failed': 'Update failed',
+  'update.set.check': 'Check for updates',
+  'update.set.check_now': 'Check now',
+  'update.set.avail': 'Version {v} is available.',
+  'update.set.latest_at': 'Up to date · checked at {time}.',
+  'update.set.never': 'Not checked since the app started.',
+  'update.set.self_built': 'Self-built copy, no automatic updates. Install with the installer from the releases page to get updates automatically.',
+};

@@ -13,6 +13,7 @@
   import { fmtGB, fmtBytes, copyText, errText } from './format.js';
   import { t, i18n, LOCALES } from './i18n.svelte.js';
   import { MCP_CLIENTS } from './mcpClients.js';
+  import { updater } from './update.svelte.js';
   import Glyph from './Glyph.svelte';
   import FilterTabs from './FilterTabs.svelte';
   import OptionRow from './OptionRow.svelte';
@@ -289,7 +290,19 @@
         <OptionRow glyph="info" title="Vietnamese's Ultimate W App" desc={t('settings.about.app_desc')}>
           <span class="mono small muted">{APP_VERSION}</span>
         </OptionRow>
-        <OptionRow glyph="refresh" title={t('settings.about.update')} desc={t('settings.about.update_desc')} soon on={false} />
+        {#if updater.info?.enabled}
+          <OptionRow glyph="refresh" title={t('settings.about.update')} desc={t('settings.about.update_desc')}
+            on={prefs.updateAuto} onchange={(v) => prefs.set('updateAuto', v)} />
+          <OptionRow glyph="download" title={t('update.set.check')} desc={updater.avail ? t('update.set.avail', { v: updater.avail.version }) : updater.lastCheck ? t('update.set.latest_at', { time: new Date(updater.lastCheck).toLocaleTimeString(i18n.intl, { hour: '2-digit', minute: '2-digit' }) }) : t('update.set.never')}>
+            {#snippet below()}{#if updater.error}<span class="small ai-error">{updater.error}</span>{/if}{/snippet}
+            {#if updater.avail}
+              <button type="button" class="btn sm primary" disabled={updater.phase !== 'idle'} onclick={() => updater.install()}><Glyph name="download" size={12} /> {t('update.btn.install')}</button>
+            {/if}
+            <button type="button" class="btn sm" disabled={updater.checking || updater.phase !== 'idle'} onclick={() => updater.check({ manual: true })}>{#if updater.checking}<span class="spin xs"></span>{/if} {t('update.set.check_now')}</button>
+          </OptionRow>
+        {:else}
+          <OptionRow glyph="refresh" title={t('settings.about.update')} desc={t('update.set.self_built')} on={false} disabled />
+        {/if}
         <OptionRow glyph="document" title={t('settings.about.log')} desc={store.settings.log_path || LOCAL_DIR + '\\log.txt'}>
           <button type="button" class="btn sm" onclick={() => store.openLog()}><Glyph name="open" size={12} /> {t('settings.about.open_log')}</button>
         </OptionRow>

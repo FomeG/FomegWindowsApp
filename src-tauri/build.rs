@@ -7,6 +7,9 @@ fn main() {
     println!("cargo:rerun-if-changed=app.manifest");
     println!("cargo:rerun-if-changed=app-dev.manifest");
     println!("cargo:rerun-if-env-changed=FOMEG_NO_ADMIN");
+    // tự cập nhật: CI nhúng repo + khoá công khai (src/update.rs, option_env!)
+    println!("cargo:rerun-if-env-changed=FOMEG_UPDATE_REPO");
+    println!("cargo:rerun-if-env-changed=FOMEG_UPDATE_PUBKEY");
     println!("cargo:rustc-check-cfg=cfg(embed_mcp)");
     let release = std::env::var("PROFILE").as_deref() == Ok("release");
     if release {

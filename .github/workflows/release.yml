@@ -1,0 +1,119 @@
+# Phát hành: khi main có version mới (package.json) mà chưa có Release v<version> -> build bộ cài NSIS có
+# chữ ký cập nhật, tạo GitHub Release kèm setup.exe + .sig + latest.json. App đã cài tự thấy bản mới (src-tauri/src/update.rs).
+# Merge không đổi version (sửa chữ, tài liệu…) -> không phát hành gì. Code đã được CI kiểm tra ở PR (bật branch protection
+# bắt buộc CI xanh cho main), nên ở đây không chạy lại CI để khỏi mất thêm 10–20 phút. Xem docs/auto-update-plan.md.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'src-tauri/**', 'mcp/**', 'scripts/**', 'index.html', 'vite.config.js', 'package.json', 'package-lock.json', '.github/workflows/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# không bao giờ chạy hai lần phát hành cùng lúc, không huỷ lần đang chạy
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  version:
+    name: Có version mới không?
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver=$(jq -r .version package.json)
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          if gh release view "v$ver" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release v$ver đã có – bỏ qua. Muốn phát hành bản mới: npm run bump <version>."
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Sẽ phát hành v$ver."
+          fi
+
+  release:
+    name: Build + phát hành v${{ needs.version.outputs.version }}
+    needs: version
+    if: needs.version.outputs.release == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # cần tag cũ để viết ghi chú phát hành
+
+      - name: Kiểm tra secrets / variables
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          PUB: ${{ vars.TAURI_UPDATER_PUBKEY }}
+        run: |
+          [ -n "$KEY" ] || { echo "::error::Thiếu secret TAURI_SIGNING_PRIVATE_KEY (xem docs/auto-update-plan.md mục 5)"; exit 1; }
+          [ -n "$PUB" ] || { echo "::error::Thiếu variable TAURI_UPDATER_PUBKEY (xem docs/auto-update-plan.md mục 5)"; exit 1; }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: windows-release
+          cache-on-failure: true
+
+      - name: Cài gói npm
+        run: npm ci
+
+      # Ghi chú phát hành = các commit kể từ tag trước (bỏ commit merge và commit "chore: phát hành …")
+      - name: Ghi chú phát hành
+        id: notes
+        shell: bash
+        run: |
+          prev=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          log=$(git log --no-merges --pretty='- %s' ${prev:+$prev..}HEAD -- src src-tauri mcp | grep -viE '^- (chore|ci|docs)(\(.*\))?:' | head -40 || true)
+          {
+            echo 'body<<NOTES_EOF'
+            echo '## Có gì mới / What’s new'
+            echo
+            if [ -n "$log" ]; then echo "$log"; else echo '- Cải thiện và sửa lỗi nhỏ / Minor fixes and improvements'; fi
+            echo
+            echo '---'
+            echo 'Cài lần đầu: tải `*_x64-setup.exe` bên dưới. Đã cài rồi: app tự báo và cập nhật.'
+            echo 'First install: download `*_x64-setup.exe` below. Already installed: the app updates itself.'
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build bộ cài + tạo Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # nhúng vào exe lúc build (option_env!) -> chỉ bản phát hành mới tự cập nhật
+          FOMEG_UPDATE_REPO: ${{ github.repository }}
+          FOMEG_UPDATE_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+        with:
+          args: --config src-tauri/tauri.release.conf.json
+          tagName: v__VERSION__
+          releaseName: v__VERSION__
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true

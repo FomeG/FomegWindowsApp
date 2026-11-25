@@ -197,7 +197,7 @@ export default {
   'settings.about.app': 'App',
   'settings.about.app_desc': 'Manage startup, services, processes, disks, apps and cleanup.',
   'settings.about.update': 'Check for updates',
-  'settings.about.update_desc': 'Notify when a new version is available.',
+  'settings.about.update_desc': 'Checks 10 seconds after launch, then every 6 hours while the window is open. It only notifies, never installs by itself: you choose Update, Later or Skip this version.',
   'settings.about.log': 'Log file',
   'settings.about.open_log': 'Open log',
   'settings.about.data': 'Data folder',

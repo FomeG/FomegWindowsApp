@@ -1,0 +1,72 @@
+# Kiểm tra trước khi vào main. Chạy khi: mở / cập nhật PR vào main (và PR vào dev, vd. Dependabot); sau khi merge vào main
+# (lưu cache cho các PR sau – cache tạo trong PR không dùng lại được ở PR khác); bấm tay ở tab Actions.
+# Push lên dev KHÔNG chạy (tự kiểm tra trên máy: npm run check:i18n, npm run build, cargo clippy). Không phát hành gì.
+# Không lọc theo đường dẫn: branch protection bắt buộc CI xanh thì PR chỉ sửa tài liệu vẫn có kết quả để merge.
+name: CI
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# PR được push thêm commit -> huỷ lần chạy cũ
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  check:
+    name: Build + lint + test (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # cache thư viện Rust đã biên dịch (profile ci); lưu cả khi job lỗi để lần sau không build lại từ đầu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: windows-ci
+          cache-on-failure: true
+
+      - name: Cài gói npm
+        run: npm ci
+
+      - name: Kiểm tra đa ngôn ngữ (khoá thiếu, chữ viết cứng)
+        run: node scripts/i18n-check.mjs
+
+      # dist/ phải có trước khi biên dịch Rust (tauri::generate_context! đọc frontendDist)
+      - name: Build giao diện
+        run: npm run build
+
+      # profile ci = release không LTO (src-tauri/Cargo.toml): nhanh hơn nhiều, cùng manifest và cùng tối ưu cơ bản
+      - name: Test (unit)
+        working-directory: src-tauri
+        run: cargo test --profile ci --lib --locked
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --profile ci --all-targets --locked -- -D warnings
+
+      # crate MCP chỉ là lớp vỏ ~10 dòng quanh thư viện đã test ở trên: chỉ kiểm tra Cargo.lock của nó khớp (vài giây);
+      # bản thật được build lúc phát hành (beforeBuildCommand)
+      - name: Kiểm tra Cargo.lock của MCP
+        run: cargo metadata --locked --format-version 1 --manifest-path mcp/Cargo.toml > $null

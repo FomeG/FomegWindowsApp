@@ -24,6 +24,8 @@ function saved() {
 
 class I18n {
   locale = $state('vi');
+  /** gọi mỗi lần đổi ngôn ngữ (main.js: báo backend qua set_locale) */
+  onChange = null;
   /** 'vi-VN' / 'en-US' cho Intl.* (số, ngày, so sánh chuỗi) */
   intl = $derived(INTL[this.locale] || 'vi-VN');
   #plural = { vi: new Intl.PluralRules('vi-VN') };
@@ -49,8 +51,8 @@ class I18n {
     if (persist) {
       try { localStorage.setItem(KEY, JSON.stringify(locale)); } catch {}
     }
-    // backend (thông báo lỗi, trợ lý AI) theo cùng ngôn ngữ; lỗi -> giữ tiếng Việt ở backend
-    import('./api.js').then((api) => api.setLocale(locale)).catch(() => {});
+    // backend (thông báo lỗi, trợ lý AI) theo cùng ngôn ngữ: main.js gắn hàm báo backend (tránh vòng import với api.js)
+    this.onChange?.(locale);
   }
 
   plural(n) {

@@ -47,6 +47,7 @@ unsafe extern "system" {
     fn GetFileInformationByHandleEx(h: *mut c_void, class: i32, buf: *mut c_void, size: u32) -> i32;
     fn SetFileInformationByHandle(h: *mut c_void, class: i32, buf: *const c_void, size: u32) -> i32;
     fn GetFinalPathNameByHandleW(h: *mut c_void, buf: *mut u16, len: u32, flags: u32) -> u32;
+    fn GetLongPathNameW(short: *const u16, long: *mut u16, len: u32) -> u32;
 }
 
 #[link(name = "ntdll")]
@@ -1035,6 +1036,18 @@ fn open_dir_path(path: &str) -> Option<Handle> {
     (h as isize != -1).then_some(Handle(h))
 }
 
+/// Tên đầy đủ của từng thành phần (`C:\Users\NGUYEN~1\…` -> `C:\Users\Nguyen Van A\…`). TEMP / TMP hay chứa tên 8.3;
+/// không đổi junction (khác với GetFinalPathNameByHandle) nên vẫn dùng để phát hiện đường dẫn đi qua liên kết.
+fn long_path(p: &str) -> String {
+    let w: Vec<u16> = p.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut buf = vec![0u16; 1024];
+    let n = unsafe { GetLongPathNameW(w.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) } as usize;
+    if n == 0 || n >= buf.len() {
+        return p.to_owned();
+    }
+    String::from_utf16_lossy(&buf[..n])
+}
+
 fn final_path(h: *mut c_void) -> Option<String> {
     let mut buf = vec![0u16; 1024];
     let n = unsafe { GetFinalPathNameByHandleW(h, buf.as_mut_ptr(), buf.len() as u32, 0) } as usize;
@@ -1304,7 +1317,9 @@ fn open_root(root: &str) -> Result<Option<Handle>, String> {
     if a & ATTR_DIRECTORY == 0 || a & ATTR_REPARSE != 0 {
         return Err(tr!("cleanup.err.is_link"));
     }
-    if !final_path(h.0).is_some_and(|p| p.eq_ignore_ascii_case(root)) {
+    // so với tên đầy đủ: gốc lấy từ TEMP có thể là tên 8.3 (RUNNER~1) dù không đi qua liên kết nào
+    let want = long_path(root);
+    if !final_path(h.0).is_some_and(|p| p.trim_end_matches('\\').eq_ignore_ascii_case(want.trim_end_matches('\\'))) {
         return Err(tr!("cleanup.err.via_link"));
     }
     Ok(Some(h))

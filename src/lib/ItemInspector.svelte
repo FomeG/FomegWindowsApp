@@ -47,8 +47,9 @@
   const N = 120;
   const mb = $derived(item ? store.ram.get(item.id) ?? 0 : 0);
   const running = $derived(item ? (svc ? svc.state === 'running' : mb >= 0.5) : false);
-  let ht = [];
-  let hm = [];
+  // mảng thường + bộ đếm hv (Chart vẽ lại theo version): không tạo mảng mới mỗi giây, chỉ làm rỗng khi đổi mục
+  const ht = [];
+  const hm = [];
   let hv = $state(0);
   // chỉ phụ thuộc id (mục được thay bằng đối tượng mới khi bật/tắt -> không làm mất biểu đồ)
   const itemId = $derived(item?.id ?? null);
@@ -62,8 +63,8 @@
       if (ht.length > N) { ht.shift(); hm.shift(); }
       hv++;
     });
-    ht = [];
-    hm = [];
+    ht.length = 0;
+    hm.length = 0;
     untrack(() => hv++);
     if (!id) return;
     sample();

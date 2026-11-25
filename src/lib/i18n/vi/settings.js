@@ -204,7 +204,7 @@ export default {
   'settings.about.app': 'Ứng dụng',
   'settings.about.app_desc': 'Quản lý khởi động, dịch vụ, tiến trình, ổ đĩa, ứng dụng và dọn dẹp.',
   'settings.about.update': 'Tự kiểm tra bản mới',
-  'settings.about.update_desc': 'Báo khi có phiên bản mới để tải về.',
+  'settings.about.update_desc': 'Kiểm tra 10 giây sau khi mở app, rồi mỗi 6 giờ khi cửa sổ đang mở. Chỉ báo, không tự cài: bạn chọn Cập nhật, Để sau hoặc Bỏ qua bản này.',
   'settings.about.log': 'Tệp nhật ký',
   'settings.about.open_log': 'Mở log',
   'settings.about.data': 'Thư mục dữ liệu',

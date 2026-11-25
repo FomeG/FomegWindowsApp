@@ -54,6 +54,14 @@ export const setVisible = (visible) => call('set_visible', { visible });
 export const setIdleInterval = (ms) => call('set_idle_interval', { ms });
 /** ngôn ngữ của backend (thông báo lỗi, trợ lý AI): 'vi' | 'en' */
 export const setLocale = (locale) => call('set_locale', { locale });
+
+// ---------- tự cập nhật (src-tauri/src/update.rs) ----------
+/** { enabled, version, repo } – enabled = false ở bản tự build */
+export const updateInfo = () => call('update_info');
+/** null = đang là bản mới nhất, hoặc { version, current, notes, date_ms } */
+export const updateCheck = () => call('update_check');
+/** tải + cài + mở lại app; chỉ trả về khi lỗi. Sự kiện 'update_progress' { stage: download|install, got, total } */
+export const updateInstall = () => call('update_install');
 /** mở lại app bằng quyền Admin (UAC) rồi đóng bản này */
 export const relaunchAdmin = () => call('relaunch_admin');
 export const setWatch = (procs) => call('set_watch', { procs });

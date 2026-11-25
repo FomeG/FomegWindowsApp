@@ -24,6 +24,7 @@ class Prefs {
   staleDays = $state(load('ui:staleDays', 90)); // ngưỡng "Lâu không dùng" (trang Ứng dụng)
   appsMeasure = $state(load('ui:appsMeasure', true)); // tự đo dung lượng thật khi mở trang Ứng dụng
   startupAll = $state(load('ui:startupAll', false)); // trang Khởi động mở với mọi nguồn
+  updateAuto = $state(load('ui:updateAuto', true)); // tự kiểm tra bản mới (update.svelte.js)
 
   set(key, v) {
     this[key] = v;
