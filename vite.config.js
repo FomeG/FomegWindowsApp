@@ -12,7 +12,11 @@ export default defineConfig({
     strictPort: true,
     host: host || false,
     hmr: host ? { protocol: 'ws', host, port: 1421 } : undefined,
-    watch: { ignored: ['**/src-tauri/**'] },
+    // chỉ theo dõi giao diện: target/ (build Rust ở gốc workspace, hàng chục nghìn tệp, exe/pdb bị khoá lúc
+    // build -> "EBUSY") và các thư mục không phải giao diện không cần theo dõi
+    watch: {
+      ignored: ['**/src-tauri/**', '**/target/**', '**/mcp/**', '**/RustWTM/**', '**/docs/**', '**/codex/**', '**/screenshots/**'],
+    },
   },
   envPrefix: ['VITE_', 'TAURI_ENV_'],
   build: {

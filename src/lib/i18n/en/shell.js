@@ -31,8 +31,8 @@ export default {
   'shell.nav.ai': 'AI assistant',
   'shell.nav.ai_tip': 'AI assistant (Ctrl+J)',
   'shell.nav.settings': 'Settings',
-  'shell.nav.log': 'Open log',
-  'shell.nav.log_tip': 'Open log file',
+  'shell.nav.whatsnew': 'What’s new',
+  'shell.nav.whatsnew_tip': 'Changelog of every version',
 
   'shell.status.label': 'Status bar',
   'shell.status.mem': 'Memory',

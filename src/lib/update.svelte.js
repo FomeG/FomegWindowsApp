@@ -5,7 +5,9 @@ import * as api from './api.js';
 import { prefs, loadPref, savePref } from './prefs.svelte.js';
 import { toasts } from './toasts.svelte.js';
 import { errText } from './format.js';
-import { t } from './i18n.svelte.js';
+import { t, i18n } from './i18n.svelte.js';
+import { APP_VERSION } from './version.js';
+import { loadChangelog } from './changelog.js';
 
 const FIRST_MS = 10_000;
 const EVERY_MS = 6 * 3600_000;
@@ -35,6 +37,7 @@ class Updater {
   async init() {
     if (this.#started) return;
     this.#started = true;
+    this.#whatsNew();
     try {
       this.info = await api.updateInfo();
     } catch {
@@ -49,6 +52,22 @@ class Updater {
       }
     }).catch(() => {});
     this.#schedule(FIRST_MS);
+  }
+
+  /** Lần mở đầu tiên sau khi lên version mới: toast "Đã cập nhật lên vX" + 3 dòng đầu của CHANGELOG(.vi).md (đầy đủ ở Cài đặt → Có gì mới).
+   *  Lần cài đầu tiên (chưa nhớ version nào) thì chỉ ghi nhớ, không báo. */
+  #whatsNew() {
+    const last = loadPref('app:lastVersion', '');
+    if (last === APP_VERSION) return;
+    savePref('app:lastVersion', APP_VERSION);
+    if (!last) return;
+    loadChangelog(i18n.locale).then((list) => {
+      const items = list.find((c) => c.version === APP_VERSION)?.bullets ?? [];
+      const details = items.slice(0, 3);
+      if (items.length > 3) details.push(t('update.done.more', { n: items.length - 3 }));
+      details.push(t('update.done.hint'));
+      toasts.push({ kind: 'success', title: t('update.done.title', { v: APP_VERSION }), details, timeout: 15000 });
+    });
   }
 
   #schedule(ms) {

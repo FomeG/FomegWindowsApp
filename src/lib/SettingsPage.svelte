@@ -20,7 +20,7 @@
   import AiSettings from './AiSettings.svelte';
   import IntervalSelect from './IntervalSelect.svelte';
 
-  const TAB_IDS = ['look', 'perf', 'pages', 'ai', 'mcp', 'win', 'keys', 'about'];
+  const TAB_IDS = ['look', 'perf', 'pages', 'ai', 'mcp', 'win', 'keys', 'logs', 'about'];
   const TABS = $derived(TAB_IDS.map((id) => [id, t(`settings.tab.${id}`)]));
   const IDLE = $derived([[5000, t('settings.idle.5s')], [15000, t('settings.idle.15s')], [60000, t('settings.idle.1m')], [0, t('settings.idle.off')]]);
   const STALE = [30, 60, 90, 180, 365];
@@ -54,7 +54,7 @@
   let relaunching = $state(false);
   const cl = $derived(MCP_CLIENTS.find((c) => c.id === client));
   const info = $derived(sys.info);
-  const dataDir = $derived((store.settings.log_path || '').replace(/[\\/][^\\/]*$/, ''));
+  const dataDir = $derived(store.settings.data_dir || '');
   const LOCAL_DIR = '%LOCALAPPDATA%\\fomeg-windows-app';
 
   onMount(() => {
@@ -66,6 +66,22 @@
     tab = id;
     savePref('ui:settingsTab', id);
   }
+  let logBusy = $state(false);
+  async function changeLogDir(dir) {
+    logBusy = true;
+    if (await store.setLogDir(dir)) toasts.success(t('settings.logs.saved'), [store.settings.log_path]);
+    logBusy = false;
+  }
+  async function pickLogDir() {
+    let dir = null;
+    try {
+      dir = await api.duPickFolder();
+    } catch (e) {
+      toasts.error(t('settings.logs.err'), [errText(e)]);
+    }
+    if (dir) await changeLogDir(dir);
+  }
+
   function pickClient(id) {
     client = id;
     savePref('ui:mcpClient', id);
@@ -285,6 +301,20 @@
             {/each}
           </div>
         {/each}
+      {:else if tab === 'logs'}
+        <h2 class="opt-group">{t('settings.logs.group')}</h2>
+        <OptionRow glyph="document" title={t('settings.logs.file')} desc={store.settings.log_path || LOCAL_DIR + '\\log.txt'}>
+          {#snippet below()}<span class="faint small">{t('settings.logs.file_desc')}</span>{/snippet}
+          <button type="button" class="btn sm" onclick={() => store.openLog()}><Glyph name="open" size={12} /> {t('settings.logs.open')}</button>
+          <button type="button" class="btn sm" disabled={!store.settings.log_dir} onclick={() => api.duOpen(store.settings.log_dir, true).catch((e) => toasts.error(t('settings.about.open_failed'), [errText(e)]))}><Glyph name="folder" size={12} /> {t('settings.logs.open_dir')}</button>
+        </OptionRow>
+        <OptionRow glyph="folder" title={t('settings.logs.dir')} desc={store.settings.log_dir || LOCAL_DIR}>
+          {#snippet below()}<span class="faint small">{store.settings.log_dir_custom ? t('settings.logs.dir_custom') : t('settings.logs.dir_default')}</span>{/snippet}
+          {#if store.settings.log_dir_custom}
+            <button type="button" class="btn sm" disabled={logBusy} onclick={() => changeLogDir(null)}>{t('settings.logs.reset')}</button>
+          {/if}
+          <button type="button" class="btn sm" disabled={logBusy} onclick={pickLogDir}>{#if logBusy}<span class="spin xs"></span>{/if} {t('settings.logs.change')}</button>
+        </OptionRow>
       {:else if tab === 'about'}
         <h2 class="opt-group">{t('settings.about.app')}</h2>
         <OptionRow glyph="info" title="Vietnamese's Ultimate W App" desc={t('settings.about.app_desc')}>
@@ -303,9 +333,6 @@
         {:else}
           <OptionRow glyph="refresh" title={t('settings.about.update')} desc={t('update.set.self_built')} on={false} disabled />
         {/if}
-        <OptionRow glyph="document" title={t('settings.about.log')} desc={store.settings.log_path || LOCAL_DIR + '\\log.txt'}>
-          <button type="button" class="btn sm" onclick={() => store.openLog()}><Glyph name="open" size={12} /> {t('settings.about.open_log')}</button>
-        </OptionRow>
         <OptionRow glyph="folder" title={t('settings.about.data')} desc={dataDir || LOCAL_DIR}>
           {#snippet below()}<span class="faint small">{t('settings.about.data_desc')}</span>{/snippet}
           <button type="button" class="btn sm" disabled={!dataDir} onclick={() => api.duOpen(dataDir, true).catch((e) => toasts.error(t('settings.about.open_failed'), [errText(e)]))}><Glyph name="folder" size={12} /> {t('settings.open')}</button>

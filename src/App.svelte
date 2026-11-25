@@ -11,6 +11,7 @@
   import ProcessesPage from './lib/ProcessesPage.svelte';
   import PerformancePage from './lib/PerformancePage.svelte';
   import SettingsPage from './lib/SettingsPage.svelte';
+  import ChangesPage from './lib/ChangesPage.svelte';
   import DiskPage from './lib/DiskPage.svelte';
   import CleanupPage from './lib/CleanupPage.svelte';
   import AppsPage from './lib/AppsPage.svelte';
@@ -84,6 +85,8 @@
         <DiskPage />
       {:else if store.page === 'cleanup'}
         <CleanupPage />
+      {:else if store.page === 'changes'}
+        <ChangesPage />
       {:else}
         <SettingsPage />
       {/if}

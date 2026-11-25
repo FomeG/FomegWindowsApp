@@ -459,7 +459,11 @@ export function createMockBackend() {
     restart_apps: true,
     is_admin: !/[?&]noadmin\b/.test(location.search),
     log_path: 'C:\\Users\\ADMIN\\AppData\\Local\\fomeg-windows-app\\log.txt',
+    log_dir: 'C:\\Users\\ADMIN\\AppData\\Local\\fomeg-windows-app',
+    log_dir_custom: false,
+    data_dir: 'C:\\Users\\ADMIN\\AppData\\Local\\fomeg-windows-app',
   };
+  const LOG_DEFAULT = settings.log_dir;
   const TOTAL = 16 * GB;
   let used = 9.2 * GB;
 
@@ -631,6 +635,14 @@ export function createMockBackend() {
     async get_settings() { await sleep(60); return { ...settings }; },
     async set_restart_apps({ on }) { await sleep(jitter(250)); settings.restart_apps = !!on; return null; },
     async mcp_info() { await sleep(30); return { path: 'C:\\Users\\ADMIN\\AppData\\Local\\fomeg-windows-app\\fomeg-windows-app-mcp.exe', exists: true, embedded: true }; },
+    async set_log_dir({ dir }) {
+      await sleep(80);
+      if (dir && /^[a-z]:\\?$|\\windows\b|\\program files/i.test(dir)) throw 'Không lưu log vào thư mục hệ thống, Program Files hay gốc ổ đĩa. Hãy chọn một thư mục khác.';
+      settings.log_dir = dir || LOG_DEFAULT;
+      settings.log_dir_custom = !!dir;
+      settings.log_path = `${settings.log_dir}\\log.txt`;
+      return { ...settings };
+    },
     async open_log() { await sleep(100); console.info('[mock] open_log', settings.log_path); return null; },
     async ports_list({ udp }) {
       await sleep(jitter(30));

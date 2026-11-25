@@ -63,9 +63,9 @@
       </button>
     </li>
     <li>
-      <button type="button" class="nav-item" title={store.settings.log_path || t('shell.nav.log_tip')} aria-label={c ? t('shell.nav.log') : undefined} onclick={() => store.openLog()}>
-        <Glyph name="document" size={16} />
-        {#if !c}<span class="grow">{t('shell.nav.log')}</span>{/if}
+      <button type="button" class="nav-item" class:active={store.page === 'changes'} aria-current={store.page === 'changes' ? 'page' : undefined} title={c ? t('shell.nav.whatsnew') : t('shell.nav.whatsnew_tip')} aria-label={c ? t('shell.nav.whatsnew') : undefined} onclick={() => (store.page = 'changes')}>
+        <Glyph name="history" size={16} />
+        {#if !c}<span class="grow">{t('shell.nav.whatsnew')}</span>{/if}
       </button>
     </li>
   </ul>

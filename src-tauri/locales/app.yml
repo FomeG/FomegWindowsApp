@@ -6,6 +6,12 @@ app.err.bad_action:
 app.err.no_log_dir:
   vi: 'Không tìm thấy thư mục log.'
   en: 'Log folder not found.'
+app.err.log_dir_protected:
+  vi: 'Không lưu log vào thư mục hệ thống, Program Files hay gốc ổ đĩa. Hãy chọn một thư mục khác.'
+  en: 'Logs can’t be stored in a system folder, Program Files or a drive root. Choose another folder.'
+app.err.log_dir_unwritable:
+  vi: 'Không ghi được vào thư mục này: %{err}'
+  en: 'Can’t write to this folder: %{err}'
 app.err.bad_interval:
   vi: 'Chu kỳ cập nhật không hợp lệ.'
   en: 'Invalid update interval.'

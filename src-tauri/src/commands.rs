@@ -288,15 +288,37 @@ pub struct Settings {
     restart_apps: bool,
     is_admin: bool,
     log_path: String,
+    /// thư mục chứa log.txt
+    log_dir: String,
+    /// người dùng đã chọn thư mục log riêng (không phải mặc định)
+    log_dir_custom: bool,
+    /// thư mục dữ liệu của app (LOCALAPPDATA, thư mục fomeg-windows-app)
+    data_dir: String,
 }
 
 #[tauri::command]
 pub fn get_settings() -> Settings {
+    let s = |p: Option<std::path::PathBuf>| p.map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
     Settings {
         restart_apps: registry::read_restart_apps(),
         is_admin: crate::is_elevated(),
-        log_path: util::log_path().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
+        log_path: s(util::log_path()),
+        log_dir: s(util::log_dir()),
+        log_dir_custom: util::log_dir_is_custom(),
+        data_dir: s(util::data_dir()),
     }
+}
+
+/// Đổi thư mục lưu log (Cài đặt → Nhật ký); `dir` null = về mặc định `%LOCALAPPDATA%\fomeg-windows-app`.
+/// Trả lại Settings mới để giao diện cập nhật đường dẫn.
+#[tauri::command]
+pub async fn set_log_dir(dir: Option<String>) -> Result<Settings, String> {
+    blocking(move || {
+        util::set_log_dir(dir.as_deref())?;
+        util::log_line(&format!("Thư mục log: {}", util::log_dir().map(|p| p.display().to_string()).unwrap_or_default()));
+        Ok(get_settings())
+    })
+    .await?
 }
 
 #[tauri::command]

@@ -203,12 +203,89 @@ pub fn data_dir() -> Option<PathBuf> {
     std::env::var("LOCALAPPDATA").ok().map(|d| Path::new(&d).join("fomeg-windows-app"))
 }
 
+/// Thư mục log người dùng chọn (Cài đặt → Nhật ký), lưu một dòng trong `<data_dir>\log_dir.txt`.
+/// Đọc một lần rồi giữ trong bộ nhớ; `set_log_dir` cập nhật cả hai. None = mặc định (data_dir).
+static LOG_DIR: std::sync::RwLock<Option<Option<PathBuf>>> = std::sync::RwLock::new(None);
+
+fn custom_log_dir() -> Option<PathBuf> {
+    if let Some(v) = LOG_DIR.read().ok().and_then(|g| g.clone()) {
+        return v;
+    }
+    let v = data_dir()
+        .and_then(|d| std::fs::read_to_string(d.join("log_dir.txt")).ok())
+        .map(|s| PathBuf::from(s.trim()))
+        .filter(|p| !p.as_os_str().is_empty() && log_dir_allowed(p));
+    if let Ok(mut g) = LOG_DIR.write() {
+        *g = Some(v.clone());
+    }
+    v
+}
+
+/// App chạy bằng quyền Admin: không ghi log vào thư mục hệ thống / Program Files / gốc ổ, kể cả khi tệp cấu hình bị sửa tay.
+fn log_dir_allowed(p: &Path) -> bool {
+    let s = p.to_string_lossy().trim_end_matches('\\').to_lowercase();
+    if !p.is_absolute() || s.starts_with(r"\\") || super::du::protected(&s) {
+        return false;
+    }
+    let env = |k: &str| std::env::var(k).unwrap_or_default().trim_end_matches('\\').to_lowercase();
+    !["SystemRoot", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"]
+        .iter()
+        .map(|k| env(k))
+        .any(|root| !root.is_empty() && (s == root || s.starts_with(&format!("{root}\\"))))
+}
+
+/// Thư mục chứa log.txt: thư mục người dùng chọn, không thì data_dir.
+pub fn log_dir() -> Option<PathBuf> {
+    custom_log_dir().or_else(data_dir)
+}
+
+pub fn log_dir_is_custom() -> bool {
+    custom_log_dir().is_some()
+}
+
+/// Đổi thư mục log (None = về mặc định). Chuyển log.txt cũ sang chỗ mới nếu chỗ mới chưa có.
+pub fn set_log_dir(dir: Option<&str>) -> Result<(), String> {
+    let old = log_path();
+    let new_dir = match dir.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(d) => {
+            let p = PathBuf::from(d);
+            if !log_dir_allowed(&p) {
+                return Err(tr!("app.err.log_dir_protected"));
+            }
+            std::fs::create_dir_all(&p).map_err(|e| e.to_string())?;
+            // thử ghi trước khi lưu, để không chuyển sang một thư mục không ghi được
+            let probe = p.join(".fomeg-write-test");
+            std::fs::write(&probe, b"").map_err(|e| tr!("app.err.log_dir_unwritable", err = e.to_string()))?;
+            let _ = std::fs::remove_file(&probe);
+            Some(p)
+        }
+        None => None,
+    };
+    let cfg = data_dir().ok_or_else(|| tr!("app.err.no_log_dir"))?;
+    std::fs::create_dir_all(&cfg).map_err(|e| e.to_string())?;
+    match &new_dir {
+        Some(p) => std::fs::write(cfg.join("log_dir.txt"), p.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?,
+        None => {
+            let _ = std::fs::remove_file(cfg.join("log_dir.txt"));
+        }
+    }
+    if let Ok(mut g) = LOG_DIR.write() {
+        *g = Some(new_dir);
+    }
+    if let (Some(o), Some(n)) = (old, log_path()) {
+        if o != n && o.is_file() && !n.exists() && std::fs::copy(&o, &n).is_ok() {
+            let _ = std::fs::remove_file(&o);
+        }
+    }
+    Ok(())
+}
+
 pub fn log_path() -> Option<PathBuf> {
-    data_dir().map(|d| d.join("log.txt"))
+    log_dir().map(|d| d.join("log.txt"))
 }
 
 pub fn log_line(msg: &str) {
-    if let Some(d) = data_dir() {
+    if let Some(d) = log_dir() {
         let _ = std::fs::create_dir_all(&d);
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(d.join("log.txt")) {
             use std::io::Write;
@@ -240,5 +317,22 @@ pub fn win_err(e: &windows::core::Error) -> String {
         tr!("errors.code", code = format!("{:08X}", e.code().0 as u32))
     } else {
         m.trim().to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_dir_refuses_system_folders() {
+        let win = std::env::var("SystemRoot").unwrap_or_else(|_| "C:/Windows".into());
+        let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:/Program Files".into());
+        for bad in ["C:/", "C:", "relative/logs", "//server/share/logs"] {
+            assert!(!log_dir_allowed(Path::new(&bad.replace('/', "\\"))), "{bad}");
+        }
+        assert!(!log_dir_allowed(&Path::new(&win).join("System32")));
+        assert!(!log_dir_allowed(&Path::new(&pf).join("Some App")));
+        assert!(log_dir_allowed(&std::env::temp_dir().join("fomeg-logs")));
     }
 }

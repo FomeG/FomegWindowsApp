@@ -67,7 +67,7 @@
 .sb-select { height: 20px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); font-size: 11.5px; padding: 0 2px; }
 
 /* ---------- settings ---------- */
-.settings-page { overflow: hidden; }
+.settings-page, .changes-page { overflow: hidden; }
 /* thân trang cuộn riêng; cột tuỳ chọn giãn hết bề rộng còn lại (co lại khi mở panel trợ lý / inspector) */
 .set-body { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -20px; padding: 0 20px 12px; }
 .set-col { display: flex; flex-direction: column; gap: 6px; container-type: inline-size; }
@@ -99,6 +99,18 @@
 /* thẻ chứa danh sách (phím tắt, thông tin máy) */
 .opt-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 4px 14px; }
 .opt-card .props.about { padding: 8px 0; }
+/* Cài đặt → Có gì mới: mỗi phiên bản một thẻ */
+.cl-card + .cl-card { margin-top: 8px; }
+.cl-head { display: flex; align-items: center; gap: 8px; min-height: 34px; padding-top: 4px; }
+.cl-head b { font-size: 13.5px; }
+.cl-tag { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 9px; font-size: 10.5px; font-weight: 600; color: var(--green); background: var(--green-soft); }
+.cl-tag.new { color: var(--accent); background: var(--accent-soft); }
+.cl-sum { margin: 0 0 4px; font-size: 12.5px; color: var(--muted); }
+.cl-body { font-size: 12.5px; padding: 2px 0 4px; }
+.cl-body h3 { margin: 8px 0 4px; font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.cl-body h4 { margin: 8px 0 4px; font-size: 12.5px; }
+.cl-body ul { margin-bottom: 6px; }
+.cl-body li + li { margin-top: 3px; }
 .key-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 34px; padding: 4px 0; }
 .key-row + .key-row { border-top: 1px solid var(--border); }
 .key-what { font-size: 12.5px; min-width: 0; }

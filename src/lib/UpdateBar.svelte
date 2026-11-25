@@ -5,11 +5,14 @@
   import { store } from './store.svelte.js';
   import { fmtBytes } from './format.js';
   import { renderMarkdown } from './markdown.js';
-  import { t } from './i18n.svelte.js';
+  import { t, i18n } from './i18n.svelte.js';
+  import { notesFor } from './changelog.js';
   import Glyph from './Glyph.svelte';
 
   let notes = $state(false);
   const a = $derived(updater.avail);
+  // chỉ phần của ngôn ngữ đang chọn, bỏ phần chân dành cho trang GitHub
+  const notesMd = $derived(notesFor(a?.notes, i18n.locale));
   const ratio = $derived(updater.phase === 'install' ? 1 : updater.total ? Math.min(1, updater.got / updater.total) : 0);
 
   async function install() {
@@ -51,6 +54,6 @@
     {/if}
   </div>
   {#if notes && updater.phase === 'idle' && a.notes}
-    <div class="update-notes md">{@html renderMarkdown(a.notes)}</div>
+    <div class="update-notes md">{@html renderMarkdown(notesMd)}</div>
   {/if}
 {/if}

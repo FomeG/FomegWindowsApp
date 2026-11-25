@@ -10,7 +10,8 @@
     "build:mcp": "cargo build --release -p fomeg-windows-app-mcp",
     "build:setup": "npm run build:mcp && tauri build --config src-tauri/tauri.release.conf.json",
     "check:i18n": "node scripts/i18n-check.mjs",
-    "bump": "node scripts/bump.mjs"
+    "bump": "node scripts/bump.mjs",
+    "notes": "node scripts/release-notes.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.5"
