@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "tauri": "tauri",
-    "build:mcp": "cargo build --release --manifest-path mcp/Cargo.toml --target-dir src-tauri/target",
+    "build:mcp": "cargo build --release -p fomeg-windows-app-mcp",
     "build:setup": "npm run build:mcp && tauri build --config src-tauri/tauri.release.conf.json",
     "check:i18n": "node scripts/i18n-check.mjs",
     "bump": "node scripts/bump.mjs"

@@ -40,10 +40,10 @@ jobs:
         with:
           components: clippy
 
-      # cache thư viện Rust đã biên dịch (profile ci); lưu cả khi job lỗi để lần sau không build lại từ đầu
+      # cache thư viện Rust đã biên dịch (profile ci, workspace ở gốc); lưu cả khi job lỗi để lần sau không build lại từ đầu
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: . -> target
           shared-key: windows-ci
           cache-on-failure: true
 
@@ -57,16 +57,10 @@ jobs:
       - name: Build giao diện
         run: npm run build
 
-      # profile ci = release không LTO (src-tauri/Cargo.toml): nhanh hơn nhiều, cùng manifest và cùng tối ưu cơ bản
+      # profile ci = release không LTO (Cargo.toml ở gốc): nhanh hơn nhiều, cùng manifest và cùng tối ưu cơ bản
       - name: Test (unit)
-        working-directory: src-tauri
-        run: cargo test --profile ci --lib --locked
+        run: cargo test --profile ci --lib --locked -p fomeg-windows-app
 
+      # cả workspace: app + crate MCP (dùng lại thư viện vừa biên dịch, chỉ thêm vài giây)
       - name: Clippy
-        working-directory: src-tauri
-        run: cargo clippy --profile ci --all-targets --locked -- -D warnings
-
-      # crate MCP chỉ là lớp vỏ ~10 dòng quanh thư viện đã test ở trên: chỉ kiểm tra Cargo.lock của nó khớp (vài giây);
-      # bản thật được build lúc phát hành (beforeBuildCommand)
-      - name: Kiểm tra Cargo.lock của MCP
-        run: cargo metadata --locked --format-version 1 --manifest-path mcp/Cargo.toml > $null
+        run: cargo clippy --profile ci --all-targets --locked --workspace -- -D warnings
