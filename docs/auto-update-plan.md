@@ -69,6 +69,7 @@ dev (push: không chạy gì)  ──►  PR dev → main  ──(PR: CI)──�
 ### Cấu hình phát hành: `src-tauri/tauri.release.conf.json`
 Build trên máy giữ nguyên (exe portable, `bundle.active: false`). CI thêm `--config src-tauri/tauri.release.conf.json`: NSIS, `createUpdaterArtifacts: true`, `installMode: perMachine`.
 - **Vì sao perMachine (Program Files)**: app chạy bằng quyền Admin; exe trong `%LOCALAPPDATA%` thì chương trình thường nào cũng ghi đè được rồi chờ bạn mở bằng Admin (leo thang quyền). Program Files chỉ Admin sửa được.
+- `productName` của bộ cài dùng dấu nháy cong `’` ("Vietnamese’s Ultimate W App"): script NSIS của Tauri đặt đường dẫn shortcut trong dấu nháy đơn, dấu `'` thường làm makensis lỗi ("macro NSISCOMCALL requires 4 parameter(s), passed 9"). Tên cửa sổ vẫn là tên gốc (`app.windows[].title`).
 - `mainBinaryName: fomeg-windows-app` giữ tên exe sau khi cài (named pipe của MCP kiểm tra tên tiến trình này).
 - Bộ cài NSIS bằng tiếng Anh (trong app vẫn theo ngôn ngữ người dùng chọn).
 - Thử bộ cài trên máy: đặt `TAURI_SIGNING_PRIVATE_KEY` (+ `_PASSWORD`) rồi `npm run build:setup` (bản này không có repo nhúng nên không tự cập nhật).
