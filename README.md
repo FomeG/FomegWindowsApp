@@ -9,12 +9,18 @@ Phần lõi viết bằng Rust gọi thẳng Windows API (không dùng PowerShel
 - Node.js LTS (`winget install OpenJS.NodeJS.LTS`)
 - WebView2: Windows 11 có sẵn.
 
+## Tải về
+
+Vào trang **Releases** của repo, tải `…_x64-setup.exe` và cài. Từ đó app tự báo khi có bản mới và cập nhật trong một cú bấm.
+
 ## Build
 
 ```powershell
 npm install
 npm run tauri build
 ```
+
+Bản tự build là exe portable, không tự cập nhật. Phát hành và tự cập nhật (nhánh `dev` → `main`, `npm run bump`, GitHub Actions): xem `docs/auto-update-plan.md`.
 
 File chạy: `src-tauri\target\release\fomeg-windows-app.exe` (một file duy nhất, mở là Windows hỏi quyền Admin).
 

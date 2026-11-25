@@ -10,5 +10,6 @@ import cleanup from './cleanup.js';
 import startup from './startup.js';
 import ai from './ai.js';
 import ports from './ports.js';
+import update from './update.js';
 
-export default { ...common, ...shell, ...settings, ...procs, ...perf, ...apps, ...disk, ...cleanup, ...startup, ...ai, ...ports };
+export default { ...common, ...shell, ...settings, ...procs, ...perf, ...apps, ...disk, ...cleanup, ...startup, ...ai, ...ports, ...update };

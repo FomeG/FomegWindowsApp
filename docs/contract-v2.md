@@ -66,6 +66,23 @@ While hidden the backend keeps sampling every `set_idle_interval` ms (default 5 
 ### Command `relaunch_admin()`
 Starts the app's own exe with `ShellExecuteEx("runas")` (UAC prompt) and exits this instance. Declined UAC → `Err`, the app keeps running.
 
+### Command `set_locale({ locale })`
+`"vi"` (default) or `"en"`: language of backend messages (`tr!`, `src-tauri/locales/*.yml`) and of the AI assistant's replies.
+
+## Auto update (`src-tauri/src/update.rs`, see `docs/auto-update-plan.md`)
+
+### Command `update_info()` → `{ enabled, version, repo }`
+`enabled` is true only in CI release builds (repo + public key embedded at compile time); self-built / dev copies never update themselves.
+
+### Command `update_check()` → `null | { version, current, notes, date_ms }`
+Reads `https://github.com/{repo}/releases/latest/download/latest.json` (30 s timeout). `null` = up to date. The found update is kept for `update_install`. Network / signature errors → `Err(string)` (localized).
+
+### Command `update_install()`
+Downloads the update found by the last `update_check`, verifies its signature, runs the NSIS installer (`/P /UPDATE /R`: passive, restart the app) and exits the app. Returns only on error (`Err`, the update stays available for a retry).
+
+### Event `update_progress`
+`{ stage: "download" | "install", got, total }` (bytes; `total` 0 when unknown), at most ~7 per second while downloading, one `install` event when the download is verified.
+
 ## Processes
 
 ### Command `set_watch({ procs })`

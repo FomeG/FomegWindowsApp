@@ -66,4 +66,5 @@ export const GLYPHS = {
   pane: 0xe8a0,
   paneClose: 0xe89f,
   plug: 0xe83e,
+  download: 0xe896,
 };

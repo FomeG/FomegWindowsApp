@@ -19,6 +19,8 @@
   import StatusBar from './lib/StatusBar.svelte';
   import PortsPage from './lib/PortsPage.svelte';
   import CleanupProgress from './lib/CleanupProgress.svelte';
+  import UpdateBar from './lib/UpdateBar.svelte';
+  import { updater } from './lib/update.svelte.js';
   import ConfirmModal from './lib/ConfirmModal.svelte';
   import ActionReview from './lib/ActionReview.svelte';
   import Toasts from './lib/Toasts.svelte';
@@ -28,6 +30,7 @@
 
   onMount(() => {
     store.init();
+    updater.init();
     sys.init();
     if (prefs.aiOpen) ai.init();
   });
@@ -58,6 +61,7 @@
         <Glyph name="warning" size={14} /> {t('shell.banner.no_admin')}
       </div>
     {/if}
+    <UpdateBar />
     {#if !isTauri}
       <div class="banner info">{t('shell.banner.mock')}</div>
     {/if}

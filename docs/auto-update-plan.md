@@ -1,216 +1,116 @@
-# Kế hoạch: tự cập nhật trong app
+# Tự cập nhật, phát hành và CI/CD
 
-Mục tiêu: người dùng cài app **một lần** bằng `setup.exe`. Từ đó, mỗi lần bạn merge một bản mới vào `main`, app của họ hiện thông báo. Họ chọn **Cập nhật**, **Để sau** hoặc **Bỏ qua bản này**. Bấm Cập nhật thì app tải bản mới, đóng lại, cài đè và tự mở lại. Họ không phải lên GitHub tải tay nữa.
+Người dùng cài app **một lần** bằng `…_x64-setup.exe`. Từ đó, mỗi lần bạn đưa một version mới vào `main`, GitHub Actions tự build và phát hành; app của họ hiện thông báo, họ chọn **Cập nhật**, **Để sau** hoặc **Bỏ qua bản này**. Bấm Cập nhật thì app tải bản mới, kiểm chữ ký, đóng lại, cài đè và tự mở lại.
 
-Trạng thái: **mới là kế hoạch, chưa có code nào.**
+Trạng thái: **đã làm xong** (code + CI). Còn các bước một lần ở mục 5 do bạn tự làm (tạo khoá ký, thêm secrets).
 
 ---
 
 ## 1. Stack
 
-| Phần | Dùng gì | Giá |
-|---|---|---|
-| Bộ cài Windows | **NSIS** (Tauri tự tải lúc build, ra `…-setup.exe`) | Miễn phí, mã nguồn mở |
-| Cập nhật trong app | **`tauri-plugin-updater`** (plugin chính thức của Tauri 2, gọi từ Rust) | Miễn phí |
-| Chữ ký bản update | Cặp khoá của Tauri (`npx tauri signer generate`) | Miễn phí |
-| Nơi chứa bản phát hành | **GitHub Releases** (`setup.exe`, `.sig`, `latest.json`) | Miễn phí |
-| Build + phát hành tự động | **GitHub Actions** + `tauri-apps/tauri-action` trên `windows-latest` | Miễn phí với repo public |
-| Chữ ký Authenticode (tuỳ chọn, để bớt cảnh báo SmartScreen) | Azure Trusted Signing / SignPath | Có phí (SignPath miễn phí cho mã nguồn mở) |
+| Phần | Dùng gì |
+|---|---|
+| Bộ cài Windows | **NSIS** (Tauri tự tải lúc build), cài cho toàn máy vào Program Files |
+| Cập nhật trong app | **`tauri-plugin-updater` 2** gọi từ Rust (`src-tauri/src/update.rs`), không dùng API JS của plugin |
+| Chữ ký bản cập nhật | Cặp khoá minisign của Tauri (`npx tauri signer generate`) |
+| Nơi chứa bản phát hành | **GitHub Releases**: `…_x64-setup.exe`, `…_x64-setup.exe.sig`, `latest.json` |
+| Build + phát hành | **GitHub Actions**: `ci.yml` (kiểm tra) + `release.yml` (`tauri-apps/tauri-action@v0`) trên `windows-latest` |
+| Phụ thuộc | Dependabot mở PR vào `dev` mỗi tháng (`.github/dependabot.yml`) |
 
-Không cần thêm thư viện JS. Giao diện gọi command Rust của app như mọi trang khác (`api.js`).
+## 2. Luồng nhánh
 
----
+```
+dev  ──(push: CI)──►  PR dev → main  ──(PR: CI)──►  merge vào main
+                                                    │
+                                  version trong package.json đã có Release?
+                                     ├─ rồi  → không làm gì (merge sửa chữ, tài liệu… không làm phiền người dùng)
+                                     └─ chưa → CI lần nữa → build bộ cài có chữ ký → Release v<version> → app tự báo
+```
 
-## 2. Người dùng thấy gì
+- Làm việc trên `dev`. Mỗi push lên `dev` và mỗi PR vào `main`/`dev` chạy **CI** (`.github/workflows/ci.yml`): kiểm tra đa ngôn ngữ, build giao diện, `cargo clippy -D warnings`, `cargo test --lib`, build MCP.
+- Muốn phát hành: trên `dev` chạy `npm run bump 0.3.1` (hoặc `patch` / `minor` / `major`), commit, mở PR `dev → main`, merge.
+- **Release** (`.github/workflows/release.yml`) chạy khi `main` thay đổi: nếu chưa có Release `v<version>` thì chạy lại CI rồi build và phát hành; có rồi thì bỏ qua. Có thể chạy tay ở tab Actions (`workflow_dispatch`).
+- Nên bật **branch protection** cho `main` (Settings → Branches): bắt buộc PR + CI xanh (`Build + lint + test (Windows)`), cấm push thẳng.
 
-1. Mở app như bình thường. Khoảng 10 giây sau, app kiểm tra bản mới ở nền. Sau đó cứ 6 giờ kiểm tra lại một lần, nhưng chỉ khi cửa sổ đang mở.
-2. Có bản mới thì hiện một dải thông báo mỏng ở đầu vùng nội dung (giống dải "không có quyền Admin"):
+## 3. Người dùng thấy gì
 
-   ```
-   ⓘ Có bản mới 0.3.1 (bạn đang dùng 0.3.0) · Có gì mới ▾        [Bỏ qua bản này] [Để sau] [Cập nhật]
-   ```
-   - **Có gì mới**: mở ra nội dung của GitHub Release, hiển thị bằng `markdown.js`.
-   - **Để sau**: ẩn đến lần mở app sau.
-   - **Bỏ qua bản này**: không báo bản `0.3.1` nữa (lưu `update:skip`). Khi có `0.3.2` thì báo lại.
-   - **Cập nhật**: dải thông báo đổi thành thanh tiến trình kiểu `CleanupProgress`, ví dụ "Đang tải 4.2 / 9.8 MB", rồi chuyển sang "Đang cài…".
-3. App đóng, bộ cài chạy ở chế độ passive (chỉ có thanh tiến trình, không bấm Next), rồi tự mở lại app.
-4. Vì app đòi quyền Admin, lúc mở lại Windows sẽ hỏi UAC **như mỗi lần mở app bình thường**.
+1. Mở app. 10 giây sau app kiểm tra bản mới ở nền, rồi cứ 6 giờ một lần, **chỉ khi cửa sổ đang hiện** và người dùng bật "Tự kiểm tra bản mới" (mặc định bật).
+2. Có bản mới → dải `UpdateBar` ở đầu vùng nội dung: "Có bản mới 0.3.1 (bạn đang dùng 0.3.0) · Có gì mới ▾ · [Bỏ qua bản này] [Để sau] [Cập nhật]".
+   - **Có gì mới**: nội dung Release, hiển thị bằng `markdown.js`.
+   - **Để sau**: ẩn tới lần mở app sau. **Bỏ qua bản này**: không báo bản đó nữa (`update:skip`); bản sau báo lại.
+   - **Cập nhật**: hỏi lại (`store.confirm`, vì việc đang chạy sẽ dừng), rồi thanh tiến trình 4 px "Đang tải 4.2 / 9.8 MB" → "Đang cài…".
+3. App đóng; bộ cài chạy chế độ passive (`/P /UPDATE /R`: chỉ có thanh tiến trình) rồi tự mở lại app. Windows hỏi UAC như mỗi lần mở app.
+4. **Cài đặt → Thông tin**: công tắc "Tự kiểm tra bản mới", dòng "Kiểm tra bản mới" (trạng thái + nút **Kiểm tra ngay**, kiểm tra tay vẫn báo bản đã Bỏ qua, có nút Cập nhật khi có bản mới). Bản tự build: công tắc bị khoá, ghi "Bản tự build, không tự cập nhật".
 
-Trang **Cài đặt → Cập nhật & hiệu năng** có nhóm "Cập nhật", gồm các `OptionRow`:
-- **Tự kiểm tra bản mới**: công tắc, mặc định bật. Hiện ở mục Thông tin đang là dòng `soon`; chuyển nó về đây và làm thật.
-- **Kiểm tra ngay**: nút bấm. Dòng phụ ghi "Đang dùng 0.3.0 · kiểm tra lúc 14:20 · đã là bản mới nhất". Kiểm tra bằng tay thì vẫn báo cả bản đã "Bỏ qua".
-- Ở bản tự build (không có repo hoặc khoá nhúng vào), hai dòng này bị khoá, kèm mô tả "Bản tự build, không tự cập nhật".
+## 4. Thiết kế kỹ thuật
 
----
-
-## 3. Thiết kế kỹ thuật
-
-### 3.1 Backend: `src-tauri/src/update.rs` (mới)
-
-- **Không ghi repo và khoá cứng trong code.** CI nhúng chúng lúc build qua `option_env!`:
-  - `FOMEG_UPDATE_REPO`: `owner/repo`, lấy từ `${{ github.repository }}`.
-  - `FOMEG_UPDATE_PUBKEY`: nội dung tệp `.key.pub`, lưu ở GitHub Variables.
-
-  Thiếu một trong hai thì `enabled: false`. Nhờ vậy bản `npm run tauri build` trên máy bạn không bao giờ tự cập nhật thành bản cài đặt.
-- Đăng ký plugin: `tauri_plugin_updater::Builder::new().pubkey(PUBKEY).build()`.
-  ⚠ `tauri.conf.json` **bắt buộc** phải có `plugins.updater`, vì plugin đòi có trường `pubkey`, thiếu là app lỗi lúc khởi động. Đặt như sau:
-  ```json
-  "plugins": { "updater": { "pubkey": "", "windows": { "installMode": "passive" } } }
-  ```
-- Ba command (chạy async, không chặn webview):
+### Backend: `src-tauri/src/update.rs`
+- Repo và khoá công khai **không ghi trong code**: CI nhúng lúc build bằng `option_env!("FOMEG_UPDATE_REPO")` (= `${{ github.repository }}`) và `option_env!("FOMEG_UPDATE_PUBKEY")` (= variable `TAURI_UPDATER_PUBKEY`). Thiếu một trong hai → `enabled: false`: bản `npm run tauri build` / `tauri dev` trên máy không bao giờ tự cập nhật. `build.rs` có `rerun-if-env-changed` cho cả hai.
+- `tauri.conf.json` **bắt buộc** có `plugins.updater` (plugin đòi trường `pubkey`, thiếu là app lỗi lúc mở): `{ "pubkey": "", "windows": { "installMode": "passive" } }`. Khoá thật được đặt lúc chạy qua `Builder::pubkey`.
+- Command (async, không chặn webview):
 
   | Command | Trả về |
   |---|---|
   | `update_info()` | `{ enabled, version, repo }` |
-  | `update_check()` | `null` (đang là bản mới nhất), hoặc `{ version, current, notes, date_ms }`. Đặt endpoint `https://github.com/{repo}/releases/latest/download/latest.json`, timeout 30 s. Giữ đối tượng `Update` trong `State<Pending>` để lúc cài đúng bản người dùng đã thấy. |
-  | `update_install()` | Gọi `download_and_install`, phát sự kiện `update_progress { stage: download\|install, got, total }` tối đa khoảng 7 lần/giây. Thành công thì plugin chạy bộ cài bằng `ShellExecuteW` rồi `exit(0)`, nên command không bao giờ trả về. Lỗi thì trả `Err`, giữ lại bản `Update` để bấm thử lại, và ghi `util::log_line`. |
+  | `update_check()` | `null` (đã mới nhất) hoặc `{ version, current, notes, date_ms }`. Endpoint `https://github.com/{repo}/releases/latest/download/latest.json`, timeout 30 s. Bản tìm được giữ trong `State<Pending>` để cài đúng bản người dùng đã thấy. |
+  | `update_install()` | `download_and_install`; sự kiện `update_progress { stage: download\|install, got, total }` tối đa ~7 lần/giây. Thành công: plugin chạy bộ cài rồi `exit(0)` (không trả về). Lỗi: `Err` (đã dịch, `locales/update.yml`), bản đã báo vẫn giữ để thử lại, ghi `util::log_line`. |
+- Plugin tự kiểm chữ ký trước khi chạy bộ cài; bộ cài bị tráo / hỏng bị từ chối.
 
-- Plugin tự kiểm chữ ký trước khi cài. Bản bị tráo hoặc hỏng thì bị từ chối.
+### Frontend
+- `src/lib/update.svelte.js` (store `updater`): `info`, `avail`, `checking`, `error`, `lastCheck`, `phase`, `got`, `total`, `hidden`; `init()` (gọi trong `App.svelte`), `check({ manual })`, `later()`, `skip()`, `install()`.
+- `src/lib/UpdateBar.svelte`: dải `.banner.update-bar` + thanh `.cp-track`/`.cp-fill` (transform, không hoạt ảnh liên tục). Glyph `download`.
+- Chữ: `src/lib/i18n/{vi,en}/update.js`. Tuỳ chọn: `prefs.updateAuto` (`ui:updateAuto`). Mock (`mock-v2.js`) giả lập bản 0.3.1 + tiến trình tải.
 
-### 3.2 Frontend
+### Version: một nguồn duy nhất
+- `package.json` là nguồn. `tauri.conf.json` có `"version": "../package.json"`, giao diện đọc qua `src/lib/version.js` (import từ package.json).
+- `npm run bump <x.y.z|patch|minor|major>` (`scripts/bump.mjs`) đổi package.json + package-lock.json + version của 2 crate Rust + 2 Cargo.lock (giữ CRLF), và từ chối version không lớn hơn bản hiện tại (người dùng chỉ nhận bản lớn hơn).
 
-- `src/lib/update.svelte.js` (store, có `import.meta.hot.decline()`):
-  - Trạng thái: `info`, `avail`, `checking`, `error`, `lastCheck`, `phase` (idle | download | install), `got`, `total`, `hidden`.
-  - `init()` được gọi trong `App.svelte`. Nó hẹn kiểm tra sau 10 giây và mỗi 6 giờ, bỏ qua nếu `document.hidden` hoặc đã tắt tự kiểm tra.
-  - Các hàm: `check({ manual })`, `later()`, `skip()` (`savePref('update:skip', version)`), `install()`.
-- `src/lib/UpdateBar.svelte`: dải thông báo và thanh tiến trình. Dùng lại class `.banner` và kiểu `.cp-track`/`.cp-fill` (thanh 4 px chạy bằng `transform`, không có hoạt ảnh liên tục). Thêm glyph `download` (Segoe Fluent `0xE896`) vào `glyphs.js`.
-- `prefs.svelte.js`: thêm `updateAuto` (mặc định `true`).
-- `api.js`: thêm `updateInfo`, `updateCheck`, `updateInstall`. `mock.js` giả lập có bản `0.3.1` kèm tiến trình tải giả, để xem giao diện trong trình duyệt.
-- Cập nhật `docs/contract-v2.md` (command và sự kiện mới) và mục kiến trúc trong `CLAUDE.md`.
-
-### 3.3 Cấu hình build phát hành: `src-tauri/tauri.release.conf.json` (mới)
-
-Lệnh build trên máy giữ nguyên (chỉ ra exe portable, nhanh). Chỉ CI mới dùng tệp này qua `--config`:
-
-```json
-{
-  "bundle": {
-    "active": true,
-    "targets": ["nsis"],
-    "createUpdaterArtifacts": true,
-    "windows": { "nsis": { "installMode": "perMachine" } }
-  }
-}
-```
-
-- **Vì sao `perMachine` (cài vào Program Files):** app chạy bằng quyền Admin. Nếu exe nằm trong `%LOCALAPPDATA%`, bất kỳ chương trình thường nào cũng ghi đè được nó, rồi đợi bạn mở app với quyền Admin. Đó là lỗ hổng leo thang quyền. Exe trong Program Files thì chỉ Admin mới sửa được.
-- `createUpdaterArtifacts` cần `TAURI_SIGNING_PRIVATE_KEY` lúc build, nên chỉ bật trong CI.
-- Bộ cài sẽ bằng tiếng Anh: NSIS của Tauri không có sẵn bản dịch tiếng Việt. Trong app vẫn là tiếng Việt.
-- Có thể thêm script `npm run build:setup` để build bộ cài trên máy khi cần thử.
-
----
-
-## 4. CI/CD: `.github/workflows/release.yml`
-
-Nguyên tắc: **chỉ ra bản mới khi version thay đổi.** Merge sửa lỗi chính tả không làm người dùng nhận thông báo.
-
-```yaml
-name: Phát hành
-on:
-  push:
-    branches: [main]
-    paths: ['src/**', 'src-tauri/**', 'mcp/**', 'package.json', 'package-lock.json']
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-jobs:
-  check:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.v.outputs.version }}
-      release: ${{ steps.v.outputs.release }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: v
-        env: { GH_TOKEN: '${{ github.token }}' }
-        run: |
-          ver=$(jq -r .version src-tauri/tauri.conf.json)
-          echo "version=$ver" >> "$GITHUB_OUTPUT"
-          if gh release view "v$ver" >/dev/null 2>&1; then echo "release=false"; else echo "release=true"; fi >> "$GITHUB_OUTPUT"
-
-  release:
-    needs: check
-    if: needs.check.outputs.release == 'true'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: package-lock.json }
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: { workspaces: 'src-tauri -> target' }
-      - run: npm ci
-        working-directory: tauri
-      - name: Ghi chú phát hành
-        shell: bash
-        run: |
-          prev=$(git describe --tags --abbrev=0 2>/dev/null || true)
-          { echo "## Có gì mới"; git log --no-merges --pretty='- %s' ${prev:+$prev..}HEAD -- tauri | head -30; } > notes.md
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          FOMEG_UPDATE_REPO: ${{ github.repository }}
-          FOMEG_UPDATE_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
-        with:
-          projectPath: tauri
-          args: --config src-tauri/tauri.release.conf.json
-          tagName: v__VERSION__
-          releaseName: 'v__VERSION__'
-          releaseBodyPath: notes.md   # kiểm tra lại tên tham số theo bản tauri-action đang dùng
-          releaseDraft: false
-          includeUpdaterJson: true
-```
-
-Ghi chú:
-- `beforeBuildCommand` đã chạy `build:mcp`, nên `fomeg-windows-app-mcp.exe` vẫn được nhúng như hiện nay.
-- Trên Release cần có: `…_x64-setup.exe`, `…_x64-setup.exe.sig` và `latest.json` (do tauri-action tạo).
-- `releases/latest/download/latest.json` chỉ trỏ tới bản **đã phát hành, không phải pre-release**. Muốn thử trước thì dùng `releaseDraft: true`, kiểm tra xong rồi mới bấm Publish.
-- PR chưa merge có thể chạy thêm một job kiểm tra build (`cargo check`, `npm run build`). Job này không phát hành.
-
-### Tăng version: `scripts/bump.mjs` (mới)
-
-Version hiện nằm ở **5 chỗ**: `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `mcp/Cargo.toml`, `package.json` và `src/lib/version.js` (`APP_VERSION`). Script `npm run bump 0.3.1` sửa cả năm chỗ (giữ nguyên CRLF) để không bỏ sót. Nên cân nhắc để giao diện lấy version từ `update_info` thay cho `version.js`, để bớt một chỗ phải sửa.
-
----
+### Cấu hình phát hành: `src-tauri/tauri.release.conf.json`
+Build trên máy giữ nguyên (exe portable, `bundle.active: false`). CI thêm `--config src-tauri/tauri.release.conf.json`: NSIS, `createUpdaterArtifacts: true`, `installMode: perMachine`.
+- **Vì sao perMachine (Program Files)**: app chạy bằng quyền Admin; exe trong `%LOCALAPPDATA%` thì chương trình thường nào cũng ghi đè được rồi chờ bạn mở bằng Admin (leo thang quyền). Program Files chỉ Admin sửa được.
+- `mainBinaryName: fomeg-windows-app` giữ tên exe sau khi cài (named pipe của MCP kiểm tra tên tiến trình này).
+- Bộ cài NSIS bằng tiếng Anh (trong app vẫn theo ngôn ngữ người dùng chọn).
+- Thử bộ cài trên máy: đặt `TAURI_SIGNING_PRIVATE_KEY` (+ `_PASSWORD`) rồi `npm run build:setup` (bản này không có repo nhúng nên không tự cập nhật).
 
 ## 5. Việc bạn tự làm một lần
 
-1. Tạo repo GitHub và đẩy thư mục dự án lên (thư mục này hiện chưa là git repo). Nên để **public** thì GitHub Actions miễn phí và người dùng tải được bản phát hành.
-2. Tạo khoá ký update trên máy bạn:
+1. **Tạo khoá ký cập nhật** trên máy bạn (PowerShell):
    ```powershell
    npx tauri signer generate -w "$env:USERPROFILE\.tauri\fomeg-updater.key"
    ```
-   Đặt mật khẩu khi được hỏi. Lệnh tạo ra `fomeg-updater.key` (bí mật) và `fomeg-updater.key.pub` (công khai).
-3. Trên GitHub, vào repo → Settings → Secrets and variables → Actions:
-   - **Secrets**: `TAURI_SIGNING_PRIVATE_KEY` (nội dung tệp `.key`) và `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
-   - **Variables**: `TAURI_UPDATER_PUBKEY` (nội dung tệp `.key.pub`).
-4. **Sao lưu tệp `.key` và mật khẩu ở chỗ an toàn.** Mất khoá thì các bản đã cài không nhận update mới được nữa, người dùng phải tự tải lại bộ cài.
+   Đặt mật khẩu khi được hỏi. Ra hai tệp: `fomeg-updater.key` (**bí mật**) và `fomeg-updater.key.pub` (công khai).
+2. **GitHub → repo → Settings → Secrets and variables → Actions**:
+   - tab **Secrets**: `TAURI_SIGNING_PRIVATE_KEY` = toàn bộ nội dung tệp `.key`; `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` = mật khẩu.
+   - tab **Variables**: `TAURI_UPDATER_PUBKEY` = toàn bộ nội dung tệp `.key.pub`.
+   Thiếu thứ nào thì job Release dừng sớm và báo rõ thiếu gì.
+3. Nếu job Release báo lỗi 403 khi tạo Release: **Settings → Actions → General → Workflow permissions** → *Read and write permissions*.
+4. **Sao lưu tệp `.key` và mật khẩu** ở chỗ an toàn (password manager). Mất khoá = các bản đã cài không nhận cập nhật được nữa, người dùng phải tự tải lại bộ cài. Không bao giờ commit tệp `.key` (`.gitignore` đã chặn `*.key`).
+5. (Nên) bật branch protection cho `main` như mục 2.
+6. Repo nên **public**: Actions miễn phí và người dùng tải được bộ cài / `latest.json` không cần đăng nhập. Repo private thì app không đọc được Release.
 
 ## 6. Mỗi lần ra bản mới
 
-1. `npm run bump 0.3.1`, commit, mở PR, merge vào `main`.
-2. CI build khoảng 10–15 phút, rồi tạo Release `v0.3.1` kèm ghi chú.
-3. Người dùng thấy thông báo ở lần kiểm tra tiếp theo (lúc mở app, hoặc trong vòng 6 giờ).
+```powershell
+git switch dev
+npm run bump patch            # 0.3.0 -> 0.3.1 (hoặc: npm run bump 0.4.0)
+git commit -am "chore: phát hành v0.3.1"
+git push
+# mở PR dev -> main, chờ CI xanh, merge
+```
+CI build khoảng 10–20 phút rồi tạo Release `v0.3.1` (ghi chú = các commit từ bản trước, bỏ `chore:`/`ci:`/`docs:`). Người dùng thấy thông báo ở lần kiểm tra tiếp theo (lúc mở app, hoặc trong vòng 6 giờ).
 
----
+Viết commit theo kiểu `feat: …`, `fix: …` (tiếng Việt cũng được) để ghi chú phát hành dễ đọc.
 
-## 7. Hạn chế và rủi ro đã biết
+## 7. Hạn chế đã biết
 
-- **SmartScreen**: lần tải `setup.exe` đầu tiên bằng trình duyệt vẫn bị cảnh báo "Unknown publisher" vì exe chưa có chữ ký Authenticode. Các lần update sau tải từ trong app, file không bị gắn dấu "tải từ Internet", nên thường không bị cảnh báo.
-- **UAC khi mở lại sau cập nhật**: không tránh được, vì app đòi quyền Admin. Cần thử thật một lần xem bộ cài NSIS (`RunAsUser`) có mở lại app được không. Nếu không, người dùng tự mở lại app.
-- **Bản portable / tự build** không tự cập nhật (`enabled: false`). Người dùng bản portable cũ cần cài `setup.exe` một lần.
-- **Chống hạ version**: plugin có tuỳ chọn `requireSignedVersion` (buộc chữ ký ghi đúng version). Chỉ bật sau khi kiểm tra được rằng CLI dùng trong CI có ghi version vào chữ ký. Bật mà CLI không ghi thì mọi bản update sẽ bị từ chối.
-- **Đang dọn dẹp hoặc gỡ ứng dụng** thì không nên cập nhật giữa chừng. Lúc đó nút Cập nhật nên hỏi lại qua `store.confirm`.
+- **SmartScreen**: lần tải `setup.exe` đầu tiên bằng trình duyệt bị cảnh báo "Unknown publisher" vì chưa có chữ ký Authenticode (chữ ký minisign chỉ dùng cho updater). Các lần cập nhật trong app tải trực tiếp nên thường không bị. Muốn hết hẳn: Azure Trusted Signing hoặc SignPath (miễn phí cho mã nguồn mở), cấu hình `bundle.windows.signCommand` trong `tauri.release.conf.json`.
+- **UAC khi mở lại** sau cập nhật là bình thường (app đòi quyền Admin).
+- **Bản portable / tự build** không tự cập nhật; người dùng bản cũ (`quanlykhoidong.exe`) cài `setup.exe` một lần, dữ liệu được `core/migrate.rs` chuyển sang tên mới.
+- **Chống hạ version**: `requireSignedVersion` của plugin chưa bật; chỉ bật sau khi kiểm chứng CLI trong CI ghi version vào chữ ký, nếu không mọi bản cập nhật sẽ bị từ chối.
 
-## 8. Cách kiểm tra
+## 8. Cách kiểm tra lần đầu
 
-1. Build bản `0.3.0` có nhúng repo và khoá, cài bằng `setup.exe`.
-2. Phát hành `0.3.1` lên repo (có thể là một repo thử).
-3. Mở bản `0.3.0` và lần lượt kiểm tra: thông báo hiện lên, **Để sau** (mở lại app thì báo lại), **Bỏ qua bản này** (không báo nữa), **Kiểm tra ngay** trong Cài đặt (vẫn báo), **Cập nhật** (tải, cài, mở lại, đúng version `0.3.1`).
-4. Thử tráo `setup.exe` trên Release mà không ký lại: app phải từ chối cài.
-5. Tắt mạng rồi kiểm tra: phải có thông báo lỗi dễ hiểu, app không bị treo.
+1. Làm mục 5, rồi phát hành `0.3.1` theo mục 6. Kiểm tra Release có `…_x64-setup.exe`, `.sig`, `latest.json`.
+2. Cài `0.3.1` bằng setup.exe. Mở Cài đặt → Thông tin: phải thấy công tắc "Tự kiểm tra bản mới" (không bị khoá) và "Đã là bản mới nhất" sau khi bấm Kiểm tra ngay.
+3. Phát hành `0.3.2`. Mở `0.3.1`: dải thông báo hiện → thử **Để sau** (mở lại app thì báo lại), **Bỏ qua bản này**, **Kiểm tra ngay** (vẫn báo), **Cập nhật** (tải, cài, mở lại, đúng `0.3.2` ở thanh trạng thái).
+4. Tắt mạng rồi Kiểm tra ngay: phải có thông báo lỗi dễ hiểu, app không treo.

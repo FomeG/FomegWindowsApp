@@ -553,6 +553,22 @@ export function createV2Mock(emit, { diskReply, portsReply, cleanupReply } = {})
     },
     async set_visible({ visible: v }) { visible = !!v; schedule(); return null; },
     async set_locale() { return null; },
+    // tự cập nhật: giả lập có bản 0.3.1 và tiến trình tải ~9.8 MB (xem giao diện trong trình duyệt)
+    async update_info() { return { enabled: true, version: '0.3.0', repo: 'mock/mock' }; },
+    async update_check() {
+      await sleep(600);
+      return { version: '0.3.1', current: '0.3.0', notes: '## Có gì mới\n- Sửa lỗi A\n- Thêm tính năng B', date_ms: Date.now() - 864e5 };
+    },
+    async update_install() {
+      const total = 9.8 * 1024 * 1024;
+      for (let got = 0; got < total; got += total / 20) {
+        await sleep(150);
+        emit('update_progress', { stage: 'download', got, total });
+      }
+      emit('update_progress', { stage: 'install', got: 0, total: 0 });
+      await sleep(1500);
+      throw 'Bản xem thử không cài được bản mới.';
+    },
     async set_idle_interval({ ms }) {
       if (![0, 5000, 15000, 60000].includes(ms)) throw 'Chu kỳ khi ẩn không hợp lệ';
       return null;

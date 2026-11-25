@@ -1,0 +1,22 @@
+// vi – tự cập nhật (UpdateBar, update.svelte.js, Cài đặt → Thông tin). Khoá dạng 'update.xxx'.
+export default {
+  'update.bar.available': 'Có bản mới {v} (bạn đang dùng {cur})',
+  'update.bar.notes': 'Có gì mới',
+  'update.bar.downloading': 'Đang tải bản mới {got} / {total}',
+  'update.bar.downloading_unknown': 'Đang tải bản mới {got}',
+  'update.bar.installing': 'Đang cài {v}… App sẽ tự đóng và mở lại.',
+  'update.btn.skip': 'Bỏ qua bản này',
+  'update.btn.later': 'Để sau',
+  'update.btn.install': 'Cập nhật',
+  'update.confirm.title': 'Cập nhật lên {v}?',
+  'update.confirm.message': 'App sẽ tải bản mới, đóng lại, cài đè rồi tự mở lại (Windows hỏi quyền Admin như mỗi lần mở app). Việc đang chạy (dọn dẹp, gỡ ứng dụng, câu trả lời của trợ lý) sẽ dừng giữa chừng.',
+  'update.toast.latest': 'Đang dùng bản mới nhất ({v})',
+  'update.toast.check_failed': 'Không kiểm tra được bản mới',
+  'update.toast.install_failed': 'Không cập nhật được',
+  'update.set.check': 'Kiểm tra bản mới',
+  'update.set.check_now': 'Kiểm tra ngay',
+  'update.set.avail': 'Có bản mới {v}.',
+  'update.set.latest_at': 'Đã là bản mới nhất · kiểm tra lúc {time}.',
+  'update.set.never': 'Chưa kiểm tra lần nào từ khi mở app.',
+  'update.set.self_built': 'Bản tự build, không tự cập nhật. Cài bằng bộ cài trên trang phát hành để nhận bản mới tự động.',
+};
