@@ -116,4 +116,6 @@ jobs:
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
+          # tên tệp gọn, không dấu cách / dấu nháy: fomeg-windows-app_0.3.0_x64-setup.exe (+ .sig); latest.json theo đúng tên này
+          releaseAssetNamePattern: '[mainBinaryName]_[version]_[arch][setup][ext]'
