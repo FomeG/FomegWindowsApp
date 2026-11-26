@@ -826,46 +826,69 @@ export function createMockBackend() {
   };
   handlers.leftovers_forget = async ({ name }) => { leftList = leftList.filter((f) => f.owner !== name); };
 
-  const cleaned = new Set();
   handlers.cleanup_scan = async () => {
     await sleep(900);
     const id = ++cleanupId;
-    const full = cleanupBase().map((x) => (cleaned.has(x.id) ? { ...x, bytes: Math.round(x.recent_bytes * 0.4), files: x.recent_files, recent_bytes: Math.round(x.recent_bytes * 0.4) } : x));
+    const full = cleanupItems || cleanupBase().map((x) => x.id === 'user_temp'
+      ? { ...x, bytes: 2 * GB, recent_bytes: 2 * GB, recent_files: x.files, newest: Date.now() }
+      : x);
     cleanupItems = full;
     const slow = new Set(['cache:uv', 'cache:gradle']);
     setTimeout(() => {
-      for (const x of full) if (slow.has(x.id) && cleanupId === id) emit('cleanup_item', { scan: id, item: clone(x) });
+      if (cleanupId !== id) return;
+      for (const x of cleanupItems) if (slow.has(x.id)) emit('cleanup_item', { scan: id, item: clone(x) });
     }, 2500);
-    return { id, admin: true, took_ms: 1830, items: full.map((x) => (slow.has(x.id) ? { ...x, bytes: 0, files: 0, recent_bytes: 0, recent_files: 0, newest: 0, pending: true } : clone(x))) };
+    return { id, admin: true, system_drive: 'C:', took_ms: 1830, items: full.map((x) => (slow.has(x.id) ? { ...x, bytes: 0, files: 0, recent_bytes: 0, recent_files: 0, newest: 0, pending: true } : clone(x))) };
   };
   handlers.cleanup_apply = async ({ id, items, keepRecent }) => {
     if (id !== cleanupId || !cleanupItems) throw 'Kết quả quét đã cũ. Hãy quét lại trước khi dọn.';
-    // giả lập `cleanup_progress`: ~6 s, 4 lần/giây, đi qua từng mục theo thứ tự
+    const results = [];
+    const fresh = cleanupItems.filter((x) => items.includes(x.id)).map((x) => {
+      const result = { id: x.id, removed: 0, skipped: 0, kept_recent: 0, bytes: 0, skipped_bytes: 0, skipped_recent_bytes: 0, error: null };
+      results.push(result);
+      if (x.id === 'recycle') {
+        result.removed = x.files;
+        result.bytes = x.bytes;
+        return { ...x, bytes: 0, files: 0 };
+      }
+      if (x.id === 'windows_update') {
+        result.error = 'Không mở được thư mục.';
+        return x;
+      }
+      const oldFiles = x.files - x.recent_files;
+      const lockedOld = Math.min(oldFiles, 3);
+      const lockedRecent = keepRecent ? 0 : Math.min(x.recent_files, 3);
+      const bytesOld = x.bytes - x.recent_bytes;
+      const lockedOldBytes = lockedOld === oldFiles ? bytesOld : Math.min(bytesOld, 12 * MB);
+      const lockedRecentBytes = lockedRecent ? (lockedRecent === x.recent_files ? x.recent_bytes : Math.min(x.recent_bytes, 12 * MB)) : 0;
+      const recentBytes = keepRecent ? x.recent_bytes : lockedRecentBytes;
+      const recentFiles = keepRecent ? x.recent_files : lockedRecent;
+      const bytes = lockedOldBytes + recentBytes;
+      const files = lockedOld + recentFiles;
+      Object.assign(result, {
+        removed: x.files - files, skipped: lockedOld + lockedRecent, kept_recent: keepRecent ? recentFiles : 0,
+        bytes: x.bytes - bytes, skipped_bytes: lockedOldBytes + lockedRecentBytes, skipped_recent_bytes: lockedRecentBytes,
+      });
+      return { ...x, bytes, files, recent_bytes: recentBytes, recent_files: recentFiles, newest: files ? x.newest : 0 };
+    });
+    // Giả lập tiến độ dựa trên số tệp đã xử lý và số byte thực sự xoá.
     const picked = cleanupItems.filter((x) => items.includes(x.id) && x.id !== 'recycle');
     const totalFiles = picked.reduce((n, x) => n + x.files, 0);
     const totalBytes = picked.reduce((n, x) => n + x.bytes, 0);
+    const freedBytes = results.reduce((n, r) => n + (r.id === 'recycle' ? 0 : r.bytes), 0);
     const steps = 24;
     for (let i = 0; i <= steps && totalFiles; i++) {
       const f = i / steps;
       let acc = 0;
       const cur = picked.find((x) => (acc += x.files) >= f * totalFiles) || picked[picked.length - 1];
-      emit('cleanup_progress', { stage: 'delete', done_files: Math.round(totalFiles * f * 0.98), total_files: totalFiles, freed_bytes: Math.round(totalBytes * f * 0.95), total_bytes: totalBytes, item: cur?.name || '', recycle: items.includes('recycle'), elapsed_ms: i * 250 });
+      emit('cleanup_progress', { stage: 'delete', done_files: Math.round(totalFiles * f), total_files: totalFiles, freed_bytes: Math.round(freedBytes * f), total_bytes: totalBytes, item: cur?.name || '', recycle: items.includes('recycle'), elapsed_ms: i * 250 });
       await sleep(250);
     }
-    emit('cleanup_progress', { stage: 'measure', done_files: totalFiles, total_files: totalFiles, freed_bytes: Math.round(totalBytes * 0.95), total_bytes: totalBytes, item: '', recycle: false, elapsed_ms: steps * 250 });
+    emit('cleanup_progress', { stage: 'measure', done_files: totalFiles, total_files: totalFiles, freed_bytes: freedBytes, total_bytes: totalBytes, item: '', recycle: items.includes('recycle'), elapsed_ms: steps * 250 });
     await sleep(600);
-    const results = items.map((k) => {
-      const x = cleanupItems.find((i) => i.id === k);
-      if (!x) return { id: k, removed: 0, skipped: 0, kept_recent: 0, bytes: 0, error: null };
-      cleaned.add(k);
-      const keep = keepRecent ? x.recent_bytes : 0;
-      const locked = Math.min(x.files, 3 + (x.files % 17));
-      return { id: k, removed: Math.max(0, x.files - locked - (keepRecent ? x.recent_files : 0)), skipped: locked, kept_recent: keepRecent ? x.recent_files : 0, bytes: Math.round((x.bytes - keep) * 0.97), error: k === 'windows_update' ? 'Không mở được thư mục.' : null };
-    });
-    const fresh = cleanupItems
-      .filter((x) => items.includes(x.id))
-      .map((x) => (x.id === 'recycle' ? { ...x, bytes: 0, files: 0 } : { ...x, bytes: keepRecent ? Math.round(x.recent_bytes) : 0, files: keepRecent ? x.recent_files : 0, recent_bytes: keepRecent ? x.recent_bytes : 0 }));
     for (const x of fresh) cleanupItems[cleanupItems.findIndex((i) => i.id === x.id)] = x;
+    // xoá vĩnh viễn thật sự giải phóng chỗ (cả Thùng rác được dọn): ổ hệ thống giả của trang Ổ cứng trống thêm tương ứng
+    duMock.__freeBytes(results.reduce((n, r) => n + (r.bytes || 0), 0));
     return { results, items: clone(fresh), took_ms: 1180 };
   };
   const cleanupReply = () =>

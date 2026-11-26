@@ -23,7 +23,7 @@ use std::ffi::{c_void, OsString};
 use crate::tr;
 use std::os::windows::ffi::OsStringExt;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -336,14 +336,19 @@ pub struct ScanOut {
     pub items: Vec<ItemOut>,
     pub took_ms: f64,
     pub admin: bool,
+    pub system_drive: Option<String>,
 }
 
 #[derive(Default, Serialize)]
 pub struct ItemResult {
     pub id: String,
     pub removed: u64,
-    /// tệp/thư mục bỏ qua: đang được dùng, không có quyền, liên kết, hoặc mới (khi giữ tệp mới)
+    /// tệp/thư mục bỏ qua: đang được dùng, không có quyền hoặc là liên kết
     pub skipped: u64,
+    /// dung lượng các tệp mở/xoá thất bại; không tính thư mục và liên kết
+    pub skipped_bytes: u64,
+    /// phần của skipped_bytes sửa trong 24 giờ qua, cùng mốc với lần đo lại
+    pub skipped_recent_bytes: u64,
     pub kept_recent: u64,
     pub bytes: u64,
     pub error: Option<String>,
@@ -394,11 +399,13 @@ impl Cleaner {
         self.stop_measure();
         let t0 = Instant::now();
         let admin = crate::is_elevated();
-        let mut items = discover(&Folders::get(), admin);
+        let folders = Folders::get();
+        let system_drive = folders.windows.as_deref().and_then(|path| path.get(..2)).filter(|prefix| prefix.ends_with(':')).map(str::to_ascii_uppercase);
+        let mut items = discover(&folders, admin);
         for it in items.iter_mut() {
             it.pending = true;
         }
-        let (m, rx) = Measure::start(&items);
+        let (m, rx) = Measure::start(&items, now_ms() - RECENT_MS);
         let deadline = Instant::now() + Duration::from_millis(MEASURE_WAIT_MS);
         let mut left = items.len();
         while left > 0 {
@@ -428,6 +435,9 @@ impl Cleaner {
                     let Ok(mut g) = plan.lock() else { break };
                     let Some(p) = g.as_mut().filter(|p| p.id == id) else { break };
                     let it = &mut p.items[i as usize];
+                    if !it.pending {
+                        continue; // mục đã được đo lại sau khi dọn
+                    }
                     m.fill(i as usize, it);
                     let out = it.clone();
                     drop(g);
@@ -435,7 +445,7 @@ impl Cleaner {
                 }
             });
         }
-        Ok(ScanOut { id, items, took_ms: t0.elapsed().as_secs_f64() * 1000.0, admin })
+        Ok(ScanOut { id, items, took_ms: t0.elapsed().as_secs_f64() * 1000.0, admin, system_drive })
     }
 
     fn stop_measure(&self) {
@@ -461,9 +471,11 @@ impl Cleaner {
         if targets.is_empty() {
             return Err(tr!("cleanup.err.none_selected"));
         }
-        self.stop_measure(); // đừng tranh ổ đĩa với việc xoá
+        // Tạm dừng lượt đo nền. Các mục khác tiếp tục đo từ chỗ cũ sau khi dọn.
+        let measure = self.measure.lock().ok().and_then(|g| g.clone());
+        let _paused = measure.as_ref().and_then(|m| m.io.write().ok());
         enable_privileges();
-        let cutoff = if keep_recent { now_ms() - RECENT_MS } else { i64::MAX };
+        let recent_after = now_ms() - RECENT_MS;
         let roots: Vec<(usize, String)> = targets
             .iter()
             .enumerate()
@@ -502,7 +514,7 @@ impl Cleaner {
                     }
                 }
             });
-            let (c, e) = Deleter::run(targets.len(), &roots, cutoff, &tally);
+            let (c, e) = Deleter::run(targets.len(), &roots, recent_after, keep_recent, &tally);
             let r = rh.and_then(|h| h.join().ok());
             done.store(true, Ordering::Release);
             reporter.thread().unpark(); // đừng đợi hết chu kỳ
@@ -518,12 +530,21 @@ impl Cleaner {
                     return recycle.take().unwrap_or_default();
                 }
                 let c = counts[i];
-                ItemResult { id: t.id.clone(), removed: c.removed, skipped: c.skipped, kept_recent: c.kept_recent, bytes: c.bytes, error: errors[i].clone() }
+                ItemResult {
+                    id: t.id.clone(),
+                    removed: c.removed,
+                    skipped: c.skipped,
+                    skipped_bytes: c.skipped_bytes,
+                    skipped_recent_bytes: c.skipped_recent_bytes,
+                    kept_recent: c.kept_recent,
+                    bytes: c.bytes,
+                    error: errors[i].clone(),
+                }
             })
             .collect();
 
         // đo lại các mục vừa dọn (phần còn lại thường rất nhỏ) và cập nhật kết quả quét đang giữ
-        let (m, rx) = Measure::start(&targets);
+        let (m, rx) = Measure::start(&targets, recent_after);
         for _ in 0..targets.len() {
             let Ok(i) = rx.recv() else { break };
             m.fill(i as usize, &mut targets[i as usize]);
@@ -535,8 +556,11 @@ impl Cleaner {
         }
         if let Ok(mut g) = self.plan.lock() {
             if let Some(p) = g.as_mut().filter(|p| p.id == id) {
-                for t in &targets {
-                    if let Some(x) = p.items.iter_mut().find(|x| x.id == t.id) {
+                for (i, x) in p.items.iter_mut().enumerate() {
+                    if let Some(t) = targets.iter().find(|t| t.id == x.id) {
+                        if let Some(m) = &measure {
+                            m.discard(i as u32);
+                        }
                         *x = t.clone();
                     }
                 }
@@ -788,6 +812,8 @@ fn find_caches(path: &str, comps: Vec<String>, skip: &HashSet<String>, until: In
 /// Mỗi mục đo xong -> gửi chỉ số mục qua kênh `done`.
 pub struct Measure {
     cancel: AtomicBool,
+    /// Đo nền giữ khoá đọc trong mỗi thư mục; dọn giữ khoá ghi để tạm dừng việc đo.
+    io: RwLock<()>,
     /// việc chia XOAY VÒNG giữa các mục: mỗi mục một ngăn xếp (thư mục, là gốc), hàng `turn` = mục còn việc.
     /// Mục nhỏ xong ngay, không phải chờ sau kho cache hàng triệu tệp.
     queue: Mutex<Rr>,
@@ -824,7 +850,7 @@ impl Rr {
 }
 
 impl Measure {
-    fn start(items: &[ItemOut]) -> (Arc<Measure>, mpsc::Receiver<u32>) {
+    fn start(items: &[ItemOut], recent_after: i64) -> (Arc<Measure>, mpsc::Receiver<u32>) {
         let mut rr = Rr { turn: VecDeque::new(), stacks: vec![Vec::new(); items.len()] };
         let mut total = 0;
         for (i, it) in items.iter().enumerate() {
@@ -836,12 +862,13 @@ impl Measure {
         }
         let m = Arc::new(Measure {
             cancel: AtomicBool::new(false),
+            io: RwLock::new(()),
             outstanding: AtomicUsize::new(total),
             left: items.iter().map(|it| AtomicUsize::new(if it.id == RECYCLE_ID { 0 } else { it.paths.len() })).collect(),
             sizes: items.iter().map(|_| Mutex::new(Size::default())).collect(),
             errors: items.iter().map(|_| Mutex::new(None)).collect(),
             queue: Mutex::new(rr),
-            recent_after: now_ms() - RECENT_MS,
+            recent_after,
         });
         let (tx, rx) = mpsc::channel();
         for (i, l) in m.left.iter().enumerate() {
@@ -856,14 +883,26 @@ impl Measure {
         (m, rx)
     }
 
+    /// Bỏ phần đo cũ của một mục đã đo lại. Chỉ gọi khi các luồng đo đang tạm dừng.
+    fn discard(&self, i: u32) {
+        if let Ok(mut q) = self.queue.lock() {
+            let n = q.stacks[i as usize].len();
+            q.stacks[i as usize].clear();
+            q.turn.retain(|&queued| queued != i);
+            self.outstanding.fetch_sub(n, Ordering::AcqRel);
+        }
+    }
+
     fn work(&self, done: &mpsc::Sender<u32>) {
         let mut buf = vec![0u64; du::BUF_U64];
         loop {
+            let Ok(io) = self.io.read() else { return };
             if self.cancel.load(Ordering::Relaxed) {
                 return;
             }
             let job = self.queue.lock().ok().and_then(|mut q| q.take());
             let Some((i, dir, root)) = job else {
+                drop(io);
                 if self.outstanding.load(Ordering::Acquire) == 0 {
                     return;
                 }
@@ -1107,6 +1146,8 @@ fn delete_open(h: *mut c_void) -> bool {
 struct Counts {
     removed: u64,
     skipped: u64,
+    skipped_bytes: u64,
+    skipped_recent_bytes: u64,
     kept_recent: u64,
     bytes: u64,
 }
@@ -1115,6 +1156,8 @@ impl Counts {
     fn add(&mut self, o: &Counts) {
         self.removed += o.removed;
         self.skipped += o.skipped;
+        self.skipped_bytes += o.skipped_bytes;
+        self.skipped_recent_bytes += o.skipped_recent_bytes;
         self.kept_recent += o.kept_recent;
         self.bytes += o.bytes;
     }
@@ -1147,7 +1190,8 @@ struct Deleter<'t> {
     queue: Mutex<Vec<Work>>,
     outstanding: AtomicUsize,
     counts: Vec<Mutex<Counts>>,
-    cutoff: i64,
+    recent_after: i64,
+    keep_recent: bool,
     tally: &'t Tally,
 }
 
@@ -1179,7 +1223,7 @@ pub struct CleanProgress {
 
 impl Deleter<'_> {
     /// Dọn bên trong `roots` (mục, đường dẫn). Trả số liệu theo mục + lỗi theo mục.
-    fn run(n_items: usize, roots: &[(usize, String)], cutoff: i64, tally: &Tally) -> (Vec<Counts>, Vec<Option<String>>) {
+    fn run(n_items: usize, roots: &[(usize, String)], recent_after: i64, keep_recent: bool, tally: &Tally) -> (Vec<Counts>, Vec<Option<String>>) {
         let mut errors = vec![None; n_items];
         let mut work = Vec::new();
         for (item, path) in roots {
@@ -1193,7 +1237,8 @@ impl Deleter<'_> {
             outstanding: AtomicUsize::new(work.len()),
             queue: Mutex::new(work),
             counts: (0..n_items).map(|_| Mutex::new(Counts::default())).collect(),
-            cutoff,
+            recent_after,
+            keep_recent,
             tally,
         };
         std::thread::scope(|s| {
@@ -1223,7 +1268,7 @@ impl Deleter<'_> {
                     match child {
                         Some(h) => {
                             let item = parent.item;
-                            let node = Arc::new(DirNode { h, parent: Some(parent), pending: AtomicUsize::new(1), remove: mtime < self.cutoff, item });
+                            let node = Arc::new(DirNode { h, parent: Some(parent), pending: AtomicUsize::new(1), remove: !self.keep_recent || mtime < self.recent_after, item });
                             self.list(node, &mut buf, &mut entries);
                         }
                         None => {
@@ -1259,7 +1304,7 @@ impl Deleter<'_> {
                 c.skipped += 1; // liên kết: không đụng tới (cả liên kết lẫn nơi nó trỏ tới)
             } else if attrs & ATTR_DIRECTORY != 0 {
                 subs.push(Work::Open { parent: node.clone(), name, mtime });
-            } else if mtime >= self.cutoff {
+            } else if self.keep_recent && mtime >= self.recent_after {
                 c.kept_recent += 1;
             } else {
                 // share = 0: tệp đang được mở ở đâu đó -> mở thất bại -> bỏ qua, không hỏi.
@@ -1269,7 +1314,13 @@ impl Deleter<'_> {
                         c.removed += 1;
                         c.bytes += size;
                     }
-                    _ => c.skipped += 1,
+                    _ => {
+                        c.skipped += 1;
+                        c.skipped_bytes += size;
+                        if mtime >= self.recent_after {
+                            c.skipped_recent_bytes += size;
+                        }
+                    }
                 }
             }
         }
@@ -1389,14 +1440,14 @@ mod tests {
     use std::path::PathBuf;
 
     fn bench_clean(path: &str) -> (u64, u64) {
-        let c = clean_one(path, i64::MAX);
+        let c = clean_one(path, false);
         (c.removed, c.skipped)
     }
 
-    fn clean_one(path: &str, cutoff: i64) -> Counts {
+    fn clean_one(path: &str, keep_recent: bool) -> Counts {
         enable_privileges();
         let tally = Tally { files: AtomicU64::new(0), bytes: AtomicU64::new(0), item: AtomicUsize::new(0) };
-        let (c, e) = Deleter::run(1, &[(0, path.to_owned())], cutoff, &tally);
+        let (c, e) = Deleter::run(1, &[(0, path.to_owned())], now_ms() - RECENT_MS, keep_recent, &tally);
         assert_eq!(tally.files.load(Ordering::Relaxed), c[0].removed + c[0].skipped + c[0].kept_recent, "bộ đếm tiến độ khớp số liệu");
         assert!(e[0].is_none(), "{:?}", e[0]);
         c[0]
@@ -1432,7 +1483,7 @@ mod tests {
             .map(|o| o.status.success())
             .unwrap_or(false);
 
-        let c = clean_one(root.to_str().unwrap(), i64::MAX);
+        let c = clean_one(root.to_str().unwrap(), false);
         assert!(root.is_dir(), "giữ lại gốc");
         assert!(!root.join("a.tmp").exists());
         assert!(!root.join("ro.txt").exists(), "xoá cả tệp chỉ đọc");
@@ -1474,9 +1525,49 @@ mod tests {
     fn keep_recent_keeps_new_files() {
         let root = tmp("recent");
         fs::write(root.join("new.tmp"), b"abc").unwrap();
-        let c = clean_one(root.to_str().unwrap(), now_ms() - RECENT_MS);
+        let c = clean_one(root.to_str().unwrap(), true);
         assert!(root.join("new.tmp").exists());
         assert_eq!((c.removed, c.kept_recent), (0, 1));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn apply_reports_skipped_file_sizes_and_remeasures_only_selected_items() {
+        let root = tmp("apply-bytes");
+        let other = root.join("other");
+        let selected = root.join("selected");
+        fs::create_dir(&other).unwrap();
+        fs::create_dir(&selected).unwrap();
+        fs::write(other.join("other.tmp"), b"other").unwrap();
+        let old = selected.join("old.tmp");
+        fs::write(&old, b"ab").unwrap();
+        let old_file = fs::OpenOptions::new().write(true).open(&old).unwrap();
+        old_file.set_modified(SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60)).unwrap();
+        drop(old_file);
+        fs::write(selected.join("recent.tmp"), b"abc").unwrap();
+        fs::write(selected.join("delete.tmp"), b"12345").unwrap();
+        let old_locked = fs::File::open(&old).unwrap();
+        let recent_locked = fs::File::open(selected.join("recent.tmp")).unwrap();
+
+        let item = |id: &str, path: &std::path::Path| row(id.into(), "temp", id.into(), String::new(), vec![path.to_str().unwrap().into()], "safe", false, None);
+        let mut untouched = item("other", &other);
+        untouched.bytes = 999;
+        let cleaner = Cleaner::default();
+        *cleaner.plan.lock().unwrap() = Some(Plan {
+            id: 1,
+            created: Instant::now(),
+            items: vec![untouched, item("selected", &selected)],
+        });
+        let out = cleaner.apply(1, &["selected".into()], false, |_| {}).unwrap();
+        assert_eq!(out.items.len(), 1);
+        assert_eq!(out.items[0].id, "selected");
+        assert_eq!((out.items[0].bytes, out.items[0].recent_bytes), (5, 3));
+        let r = &out.results[0];
+        assert_eq!((r.bytes, r.skipped_bytes, r.skipped_recent_bytes), (5, 5, 3));
+        assert_eq!(cleaner.plan.lock().unwrap().as_ref().unwrap().items[0].bytes, 999);
+        assert!(other.join("other.tmp").is_file());
+        drop(recent_locked);
+        drop(old_locked);
         fs::remove_dir_all(&root).unwrap();
     }
 

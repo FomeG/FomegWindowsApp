@@ -9,7 +9,8 @@
 //   options?                    – ô tích thêm: [{ id, label, warn?, init?() }] (vd. "Xoá vĩnh viễn"; init = giá trị đầu)
 //   plainLabel?                 – nhãn hàng là tên thường (mặc định: chữ mono như đường dẫn)
 //   confirmLabel(opts, n)       – chữ nút thực hiện
-//   summary?(chosen)            – chữ ở chân popup
+//   summary?(chosen, opts)      – chữ ở chân popup
+//   view?(row, opts)            – hàng như hiển thị theo giá trị HIỆN TẠI của các ô tuỳ chọn (vd. side / size đổi theo "giữ tệp mới")
 //   doneText                    – nhãn của hàng đã thực hiện xong
 //   async run(chosen, opts)     – thực hiện, trả Map key -> { ok, error }
 //   after?(okRows, failRows, opts) – thông báo / làm mới dữ liệu
@@ -33,6 +34,7 @@ import { i18n, t } from './i18n.svelte.js';
 const cnt = (n, more) => ({ count: n, n: fmtInt(n), ...more });
 
 // ---------------- xoa: xoá thư mục / tệp ----------------
+let inexactDeleted = []; // đường dẫn của lần xoá gần nhất mà số liệu cây quét có thể chưa chính xác
 const del = {
   get title() { return t('ai.review.del.title'); },
   get hint() { return t('ai.review.del.hint'); },
@@ -62,10 +64,13 @@ const del = {
   },
   async run(chosen, o) {
     const res = await api.duDeletePaths(chosen.map((r) => r.label), !!o.permanent);
+    inexactDeleted = res.filter((x) => x.inexact).map((x) => x.path);
     return new Map(res.map((x) => [x.path.toLowerCase(), { ok: x.ok, error: x.error || t('ai.review.del.failed') }]));
   },
   after(ok, fail, o) {
-    if (du.scan) du.refresh();
+    // backend đã cập nhật cây quét (kể cả xoá một phần): đọc lại cây đang mở + ổ trống, bỏ danh sách tệp cũ của các thư mục bị ảnh hưởng
+    du.changed([...ok, ...fail].map((r) => r.label));
+    if (inexactDeleted.length) toasts.warn(t('disk.toast.inexact'), [...inexactDeleted.slice(0, 3), t('disk.toast.inexact_detail')]);
     if (ok.length) {
       ai.diskChanged();
       const freed = ok.reduce((a, r) => a + (r.size || 0), 0);
@@ -133,6 +138,8 @@ const ports = {
 };
 
 // ---------------- don_dep: dọn mục của trang Dọn dẹp ----------------
+// Dung lượng dọn được theo ô "giữ tệp mới" của popup (không theo cài đặt chung), cùng công thức với trang Dọn dẹp.
+const freeableFor = (it, keep) => cleanup.freeable(it, keep);
 const clean = {
   get title() { return t('ai.review.clean.title'); },
   plainLabel: true, // nhãn là tên mục, không phải đường dẫn
@@ -152,19 +159,33 @@ const clean = {
         icon: it?.group === 'cache' ? 'folder' : 'delete',
         blocked,
         checked: !blocked,
-        size: it?.bytes ?? 0,
-        side: !it ? '' : it.pending ? t('ai.review.measuring') : t('ai.review.size_files', cnt(it.files, { size: fmtBytes(it.bytes) })),
+        // dung lượng thật sự dọn được (trừ tệp mới khi "giữ tệp mới", tệp khoá lần trước): cùng số với trang Dọn dẹp
+        it,
+        size: it ? freeableFor(it, cleanup.keepRecent) : 0,
+        side: !it ? '' : it.pending ? t('ai.review.measuring') : t('ai.review.size_files', cnt(it.files, { size: fmtBytes(freeableFor(it, cleanup.keepRecent)) })),
       };
     });
   },
   confirmLabel: (o, n) => t('ai.review.clean.confirm') + (n ? ` (${fmtInt(n)})` : ''),
-  summary: (chosen) => t('ai.review.summary_items', cnt(chosen.length, { size: fmtBytes(chosen.reduce((a, r) => a + (r.size || 0), 0)) })),
+  // kích thước hiện theo ô "giữ tệp mới" của popup NGAY (không đóng băng lúc mở popup)
+  view(r, o) {
+    if (!r.it || r.it.pending || r.blocked) return r;
+    const size = freeableFor(r.it, !!o.keepRecent);
+    return { ...r, size, side: t('ai.review.size_files', cnt(r.it.files, { size: fmtBytes(size) })) };
+  },
+  summary(chosen, o) {
+    const size = chosen.reduce((a, r) => a + (clean.view(r, o).size || 0), 0);
+    return t('ai.review.summary_items', cnt(chosen.length, { size: fmtBytes(size) }));
+  },
   async run(chosen, o) {
     const res = await cleanup.clean(chosen.map((r) => r.key), !!o.keepRecent);
     return new Map(chosen.map((r) => {
       const x = res.get(r.key);
       return [r.key, x ? { ok: !x.error, error: x.error } : { ok: false, error: t('ai.review.no_result') }];
     }));
+  },
+  after() {
+    du.changed(); // ổ trống (và cây Ổ cứng đang mở) đổi sau khi dọn
   },
 };
 

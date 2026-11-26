@@ -1,6 +1,6 @@
 <script>
   // Ngăn chi tiết trang Dọn dẹp (khung InspectorShell dùng chung).
-  // - Có mục đang trỏ -> dung lượng, phần mới < 24 giờ, mức an toàn, giải thích, các thư mục, kết quả lần dọn trước.
+  // - Có mục đang trỏ -> dung lượng dọn được, phần giữ lại, mức an toàn, các thư mục, kết quả lần dọn trước.
   // - Không có -> tổng quan: tổng tìm thấy / đã chọn, theo nhóm, lớn nhất (bấm để xem).
   import { cleanup, GROUP_LABELS, SAFETY } from './cleanup.svelte.js';
   import { C } from './colors.js';
@@ -29,7 +29,6 @@
   const groupMax = $derived(Math.max(1, ...groups.map((g) => g[1])));
   const biggest = $derived(vis.filter((it) => !it.pending).sort((a, b) => b.bytes - a.bytes).slice(0, 6));
   const chosen = $derived(cleanup.chosenItems);
-  const chosenBytes = $derived(chosen.reduce((n, it) => n + cleanup.freeable(it), 0));
 </script>
 
 {#if item}
@@ -52,14 +51,10 @@
 
     <section class="insp-card">
       <div class="ic-stats two">
-        <div><span>{t('cleanup.insp.size')}</span><b style="color:rgb({C.disk})">{item.pending ? t('cleanup.insp.measuring') : fmtBytes(item.bytes)}</b></div>
+        <div><span>{t('cleanup.col.bytes')}</span><b style="color:rgb({C.disk})">{item.pending ? t('cleanup.cell.measuring') : canPick(item) ? fmtBytes(cleanup.freeable(item)) : '–'}</b></div>
         <div><span>{t('cleanup.insp.files')}</span><b>{item.pending ? '–' : fmtInt(item.files)}</b></div>
       </div>
-      {#if !item.pending && item.recent_files}
-        <div class="res-sub muted">
-          {t(cleanup.keepRecent ? 'cleanup.insp.recent_keep' : 'cleanup.insp.recent_del', { bytes: fmtBytes(item.recent_bytes), n: fmtInt(item.recent_files) })}
-        </div>
-      {/if}
+      {#each cleanup.retainedDetails(item) as detail}<div class="res-sub muted">{detail}</div>{/each}
       {#if item.newest}<div class="res-sub faint">{t('cleanup.insp.newest', { date: fmtDate(item.newest) })}</div>{/if}
     </section>
 
@@ -100,7 +95,7 @@
     {:else}
       <div class="insp-counts">
         <div><b>{fmtBytes(vis.reduce((n, it) => n + it.bytes, 0))}</b><span>{t('cleanup.ov.found')}</span></div>
-        <div><b class:warn-text={chosen.length > 0}>{fmtBytes(chosenBytes)}</b><span>{t('cleanup.ov.chosen')}</span></div>
+        <div><b class:warn-text={chosen.length > 0}>{cleanup.chosenSize}</b><span>{t('cleanup.ov.chosen')}</span></div>
         <div><b>{fmtInt(chosen.length)}</b><span>{t('cleanup.ov.to_clean')}</span></div>
       </div>
 

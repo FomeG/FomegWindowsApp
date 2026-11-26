@@ -25,6 +25,9 @@ Bản tiếng Anh: [CHANGELOG.md](CHANGELOG.md).
 - **Bớt chạy ngầm.** Trang Cổng ngừng làm mới khi rời trang hoặc khi tạm dừng cập nhật, và biểu đồ RAM của mục khởi động và dịch vụ không ghi thêm khi tạm dừng.
 - **Kết thúc tiến trình kiểm tra lại ngay trước khi làm.** Ở trang Tiến trình, Cổng và đề xuất của trợ lý AI, tiến trình đã thoát hoặc PID đã được chương trình khác nhận sau khi bạn xác nhận sẽ được bỏ qua và báo lại, thay vì tác động nhầm.
 - **Gỡ cài đặt không chờ mãi.** Nếu trình gỡ cài đặt của ứng dụng không chạy được, app báo lỗi thay vì treo.
+- **Dọn dẹp đo đúng và cập nhật ổ C: ngay.** Dung lượng mục, khung chi tiết và tổng "đã chọn" khớp nhau; phần sẽ được giữ lại (tệp đổi trong 24 giờ qua, tệp đang được dùng lúc dọn) hiện rõ thay vì 0 B. Sau khi dọn, dung lượng trống của ổ C: đổi ngay, không cần quét lại.
+- **Ổ cứng cập nhật ngay sau khi xoá.** Dung lượng và dung lượng trống đổi liền mà không quét lại ổ; thư mục chỉ bị xoá một phần được đo lại riêng. Xoá từ menu chuột phải của Windows cũng cập nhật trang Ổ cứng, và dọn dẹp giữ đúng số liệu của các thư mục đã dọn.
+- **Khởi động lại tiến trình hoạt động lại.** Nút Khởi động lại dùng được với app thường và Explorer khi app chạy với quyền quản trị; tiến trình cũ chỉ bị kết thúc khi tiến trình mới đã sẵn sàng. Tiến trình chạy trong sandbox bị từ chối thay vì được chạy lại với quyền cao hơn.
 
 ## [0.3.0] - 2026-11-25
 

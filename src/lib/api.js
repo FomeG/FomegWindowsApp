@@ -100,8 +100,8 @@ export const duChildren = (scan, ids, sort = 'size', desc = true, limit = 500) =
 export const duFiles = (path, limit = 2000) => call('du_files', { path, limit });
 export const duCancel = () => call('du_cancel');
 export const duClose = () => call('du_close');
-export const duForget = (scan, id) => call('du_forget', { scan, id });
-export const duForgetFile = (scan, dir, size, alloc) => call('du_forget_file', { scan, dir, size, alloc });
+/** Sau thao tác ngoài app đã đổi đĩa (menu Windows): đưa cây quét về đúng với đĩa cho các đường dẫn này -> { inexact: string[] } */
+export const duSyncPaths = (paths) => call('du_sync_paths', { paths });
 export const duDelete = (paths, permanent) => call('du_delete', { paths, permanent });
 /** Thông tin các đường dẫn trợ lý đề xuất xoá: [{ path, exists, is_dir, size, files, blocked? }] */
 export const duLookup = (paths) => call('du_lookup', { paths });

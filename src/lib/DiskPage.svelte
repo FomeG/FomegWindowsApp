@@ -207,14 +207,19 @@
   async function copyPath(tg) {
     if (await copyText(tg.path)) toasts.success(t('disk.toast.copied'));
   }
-  /** Đường dẫn đã biến mất (xoá / cắt từ menu Windows) -> bỏ khỏi cây. */
-  async function syncGone(tg) {
+  // lệnh của menu Windows không đổi đĩa -> khỏi đồng bộ lại cây (đo lại một thư mục lớn tốn thời gian)
+  const READ_ONLY_VERBS = new Set(['copy', 'properties', 'open', 'opennew', 'explore', 'find', 'print', 'edit', 'openas', 'copyaspath', 'pintohome', 'pintostartscreen', 'opencontaining']);
+  /** Sau lệnh xoá / cắt / dán… của menu Windows: backend đưa cây về đúng với đĩa cho đường dẫn này (cùng logic với xoá trong app), rồi làm mới. */
+  async function syncShell(tg) {
+    let res = null;
+    try { res = await api.duSyncPaths([tg.path]); } catch {}
     let gone = false;
     try { gone = !(await api.duExists(tg.path)); } catch {}
-    if (!gone) return false;
-    if (tg.r.type === 'dir') await du.forgetDir(tg.r.id);
-    else if (tg.r.type === 'file') await du.forgetFile(tg.r.dir, tg.r.f);
-    return true;
+    if (tg.r.type === 'dir') await du.deletedDir(tg.r.id, gone);
+    else if (gone) await du.deletedFile(tg.r.dir, tg.r.f);
+    else await du.dirContentsChanged(tg.r.dir);
+    if (res?.inexact?.length) toasts.warn(t('disk.toast.inexact'), [t('disk.toast.inexact_detail')]);
+    return gone;
   }
   async function del(tg, permanent) {
     if (!tg || tg.filesRow) return;
@@ -227,13 +232,20 @@
       danger: true,
     });
     if (!ok) return;
-    try {
-      await api.duDelete([tg.path], permanent);
-      if (await syncGone(tg)) toasts.success(t(permanent ? 'disk.toast.nuked' : 'disk.toast.recycled', { name: tg.r.n?.name || tg.r.f?.name }));
-      else toasts.error(t('disk.toast.partial'), [t('disk.toast.partial_detail')]);
-    } catch (e) {
-      toasts.error(t(tg.isDir ? 'disk.toast.del_dir_failed' : 'disk.toast.del_file_failed'), [errText(e)]);
-    }
+    // backend xoá rồi cập nhật cây NGAY (mục đã mất: trừ số liệu; xoá một phần: chỉ đo lại nhánh đó), không quét lại ổ.
+    // Windows báo lỗi cũng có thể đã xoá được một phần (đã giải phóng chỗ) -> luôn đọc lại số liệu.
+    let res = null;
+    let err = null;
+    try { res = await api.duDelete([tg.path], permanent); } catch (e) { err = e; }
+    if (res?.error) err = res.error;
+    let gone = false;
+    try { gone = !(await api.duExists(tg.path)); } catch {}
+    if (tg.r.type === 'dir') du.deletedDir(tg.r.id, gone);
+    else if (gone) du.deletedFile(tg.r.dir, tg.r.f);
+    if (gone) toasts.success(t(permanent ? 'disk.toast.nuked' : 'disk.toast.recycled', { name: tg.r.n?.name || tg.r.f?.name }), permanent ? [] : [t('disk.toast.recycled_hint')]);
+    else if (err) toasts.error(t(tg.isDir ? 'disk.toast.del_dir_failed' : 'disk.toast.del_file_failed'), [errText(err)]);
+    else toasts.error(t('disk.toast.partial'), [t('disk.toast.partial_detail')]);
+    if (res?.inexact?.length) toasts.warn(t('disk.toast.inexact'), [t('disk.toast.inexact_detail')]);
   }
   async function properties(tg) {
     try { await api.procProperties(tg.path); } catch (e) { toasts.error(t('disk.toast.props_failed'), [errText(e)]); }
@@ -251,8 +263,8 @@
           else if (pick.id === 'ask_ai') ai.askFolder(tg.path);
           else if (pick.id === 'copy_path') copyPath(tg);
         } else if (pick?.kind === 'shell') {
-          // lệnh shell (xoá, cắt, đổi chỗ…) có thể chạy nền: kiểm tra lại vài lần
-          if (!(await syncGone(tg))) setTimeout(() => syncGone(tg), 2500);
+          // lệnh shell (xoá, cắt, đổi chỗ…) có thể chạy nền: đồng bộ ngay, nếu mục còn đó thì kiểm tra lại sau 2,5 s
+          if (!READ_ONLY_VERBS.has(String(pick.verb || '').toLowerCase()) && !(await syncShell(tg))) setTimeout(() => syncShell(tg), 2500);
         }
         return;
       } catch {
@@ -391,6 +403,7 @@
       {#if p}
         <span class="muted">{t('disk.status.stats', { files: fmtInt(p.files), dirs: fmtInt(p.dirs), bytes: fmtBytes(p.bytes) })}</span>
         {#if !p.done && rate}<span class="muted">{t('disk.status.rate', { rate: fmtInt(rate), time: fmtSec(p.elapsed_ms) })}</span>{/if}
+        {#if du.rootDrive}{@const dr = du.rootDrive}<span class="muted" title={t('disk.status.free_tip')}>{t('disk.status.free', { letter: dr.letter, free: fmtBytes(dr.free), total: fmtBytes(dr.total) })}</span>{/if}
         {#if p.errors}<span class="warn-text" title={t('disk.status.errors_tip')}>{t('disk.status.errors', { n: fmtInt(p.errors) })}</span>{/if}
       {/if}
     </div>

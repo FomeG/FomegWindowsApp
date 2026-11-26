@@ -22,13 +22,15 @@ class Cleanup {
   scanId = $state(0);
   items = $state.raw([]);
   admin = $state(true);
+  systemDrive = $state(null);
+  driveRevision = $state(0);
   tookMs = $state(0);
   /** '' | 'scan' | 'clean' */
   phase = $state('');
   error = $state('');
   chosen = new SvelteSet();
   keepRecent = $state(loadPref('cleanup:keepRecent', true));
-  /** kết quả lần dọn gần nhất theo mã mục */
+  /** Kết quả lần dọn gần nhất của từng mục trong lần quét hiện tại. */
   results = $state.raw(new Map());
   /** Tiến độ dọn cho thanh dưới trang (CleanupProgress): sự kiện `cleanup_progress` của backend (~4 lần/giây, chỉ trong
    *  lúc dọn), rồi { stage: 'done', … } vài giây. null = ẩn. Một object thay mới mỗi lần, không có mảng lớn. */
@@ -47,9 +49,35 @@ class Cleanup {
   get chosenItems() {
     return this.visible.filter((it) => this.chosen.has(it.id));
   }
-  /** Dung lượng sẽ giải phóng ước tính (trừ phần mới nếu đang giữ tệp mới). */
-  freeable(it) {
-    return Math.max(0, it.bytes - (this.keepRecent ? it.recent_bytes : 0));
+  get chosenSize() {
+    const items = this.chosenItems;
+    const bytes = items.reduce((n, it) => n + this.freeable(it), 0);
+    if (!items.some((it) => it.pending)) return fmtBytes(bytes);
+    return bytes ? `≥${fmtBytes(bytes)}` : '–';
+  }
+  #retained(it, keep = this.keepRecent) {
+    const last = this.results.get(it.id);
+    const skipped = last?.skipped_bytes ?? 0;
+    // Tệp vừa mới vừa bị khoá chỉ tính vào phần bỏ qua ở lần dọn trước.
+    const overlap = Math.min(it.recent_bytes, skipped, last?.skipped_recent_bytes ?? 0);
+    const recent = keep ? it.recent_bytes - overlap : 0;
+    return { recent, blocked: Math.min(Math.max(0, it.bytes - recent), skipped) };
+  }
+  /** Ước tính từ lần đo gần nhất và các tệp không xoá được ở lần dọn trước.
+   *  `keep` mặc định theo cài đặt chung; popup AI truyền giá trị ô "giữ tệp mới" của nó. */
+  freeable(it, keep = this.keepRecent) {
+    if (it.pending) return 0;
+    const { recent, blocked } = this.#retained(it, keep);
+    return Math.max(0, it.bytes - recent - blocked);
+  }
+  retainedDetails(it) {
+    if (it.pending) return [];
+    const { recent, blocked } = this.#retained(it);
+    return [
+      recent || blocked ? t('cleanup.size.total', { bytes: fmtBytes(it.bytes) }) : '',
+      recent ? t('cleanup.size.recent', { bytes: fmtBytes(recent) }) : '',
+      blocked ? t('cleanup.size.blocked', { bytes: fmtBytes(blocked) }) : '',
+    ].filter(Boolean);
   }
 
   setKeepRecent(v) {
@@ -79,8 +107,10 @@ class Cleanup {
       const r = await api.cleanupScan();
       this.scanId = r.id;
       this.admin = r.admin;
+      this.systemDrive = r.system_drive;
       this.tookMs = r.took_ms;
       this.items = r.items;
+      this.results = new Map();
       this.#sync();
     } catch (e) {
       this.error = errText(e);
@@ -92,7 +122,7 @@ class Cleanup {
   #update({ scan, item }) {
     if (scan !== this.scanId) return;
     const i = this.items.findIndex((x) => x.id === item.id);
-    if (i < 0) return;
+    if (i < 0 || !this.items[i].pending) return;
     const a = this.items.slice();
     a[i] = item;
     this.items = a;
@@ -125,10 +155,18 @@ class Cleanup {
     } catch {}
     try {
       const r = await api.cleanupApply(this.scanId, ids, keepRecent);
+      this.driveRevision += 1;
       out = new Map(r.results.map((x) => [x.id, x]));
-      this.results = out;
       const fresh = new Map((r.items || []).map((x) => [x.id, x]));
-      if (fresh.size) this.items = this.items.map((x) => fresh.get(x.id) || x);
+      if (fresh.size) {
+        this.items = this.items.map((x) => fresh.get(x.id) || x);
+        const results = new Map(this.results);
+        for (const id of fresh.keys()) {
+          if (out.has(id)) results.set(id, out.get(id));
+          else results.delete(id);
+        }
+        this.results = results;
+      }
       const removed = r.results.reduce((n, x) => n + x.removed, 0);
       const bytes = r.results.reduce((n, x) => n + x.bytes, 0);
       const skipped = r.results.reduce((n, x) => n + x.skipped + x.kept_recent, 0);

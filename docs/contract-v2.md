@@ -211,15 +211,31 @@ Files are NOT kept in the tree: `du_files` lists one folder's files on demand (t
 | `du_children` | `scan, ids[], sort: size\|alloc\|files\|dirs\|name\|mtime, desc, limit` | `[{ node: Node, path, children: Node[] (top-k by sort), more }]` |
 | `du_files` | `path, limit` | `{ total, items: [{ name, size, alloc, mtime }] }` largest first |
 | `du_cancel` / `du_close` | – | stop / stop and free the tree |
-| `du_forget` | `scan, id` | drop a deleted folder from the tree (sizes subtracted from parents) |
-| `du_forget_file` | `scan, dir, size, alloc` | same for one deleted file |
-| `du_delete` | `paths[], permanent` | `true` if nothing was aborted; refuses drive roots / Windows / Program Files / ProgramData / Users / the profile root |
+| `du_delete` | `paths[], permanent` | `{ done, error?, inexact: string[] }`: `done` = nothing was aborted; `error` = Windows' message (the deletion may be partial); `inexact` = paths whose numbers in the tree may still be off (see "Tree sync" below). Refuses drive roots / Windows / Program Files / ProgramData / Users / the profile root |
 | `du_exists` | `path` | bool (after a native-menu command) |
 | `du_open` | `path, is_dir` | folder → opens it in Explorer; file → Explorer with the file selected |
 | `du_menu` | `path, is_dir, shift` | the native Explorer context menu at the cursor (plus app items "Quét thư mục này", "Hỏi trợ lý AI về thư mục này", "Sao chép đường dẫn"; "Rename" removed). `{kind:"none"}` \| `{kind:"app", id:"scan"\|"ask_ai"\|"copy_path"}` \| `{kind:"shell", verb}` |
 | `du_lookup` | `paths[]` (≤ 200) | `[{ path (normalized), exists, is_dir, size, files, blocked? }]`; folder `size`/`files` come from the current scan (`null` if outside it); `blocked` = Vietnamese reason it can't be deleted (not absolute, missing, protected) |
-| `du_delete_paths` | `paths[], permanent` | `[{ path, ok, error? }]`. One `SHFileOperation` for the batch, retried per item on failure; refuses relative and protected paths; deleted items are dropped from the current scan tree |
+| `du_delete_paths` | `paths[], permanent` | `[{ path, ok, error?, inexact? }]`. One `SHFileOperation` for the batch, retried per item on failure; refuses relative and protected paths; the current scan tree is synced (see "Tree sync") |
+| `du_sync_paths` | `paths[]` (first 20 used) | `{ inexact: string[] }`. Called after an operation outside the app that changed the disk (Windows context menu delete / cut / paste). Applies the same tree-sync rules as `du_delete` (no sizes taken beforehand, so the item kind is read from the disk, or from the tree if it is gone). Does not rescan the drive |
 | `du_pick_folder` | – | folder path from the Windows folder picker, or `null` |
+
+**Tree sync after delete (`du_delete`, `du_delete_paths`, `du_sync_paths`).** The backend updates the current scan tree itself, right after
+Windows finishes, so the UI only refreshes its view and never rescans. `du_delete` and `du_delete_paths` take each item's size
+before deleting it and then:
+- a folder that is gone is removed from the tree and its totals are subtracted from every ancestor (`forget`);
+- a folder that still exists (e.g. files in use) is re-measured on its own branch, in place (`sync_dir`, 8 s budget);
+- a file that is gone makes the backend re-list its parent's direct files (`resync_files`); a file that is still there is unchanged.
+
+This also runs when Windows reports an error, because a partial delete still changed the disk. `inexact` (per path;
+`inexact: true` on the `du_delete_paths` row) flags a path whose numbers may still be off:
+- `Stale`: the re-measure ran out of its time budget or was cancelled, the folder could not be read, or a part that the old tree could read could not be read now. The old numbers are kept, and the UI shows them as possibly out of date;
+- `Busy`: the running scan has not finished that folder yet, so its numbers are not updated by this call (the scan counts the current state itself).
+
+Those paths are not re-measured again in this call. Application sizes and leftover caches that mention a changed path are dropped at the same time.
+
+`cleanup_apply` also syncs an open Disk scan: for each cleaned item's root that is in the scan, its branch is re-measured with the same
+rules (8 s each, 20 s in total). If there are more than 10 such roots, none are re-measured. The result does not report `inexact`.
 
 `Progress`: `{ scan, root, files, dirs, bytes, errors, elapsed_ms, done, cancelled }`, emitted as event `du` every 250 ms
 while scanning and once at the end.
@@ -313,8 +329,8 @@ The backend re-reads every entry by `id`; the UI never sends paths or commands t
 
 | Command | Args | Returns |
 | --- | --- | --- |
-| `cleanup_scan` | – | `{ id, items: CleanItem[], took_ms, admin }` after ≤ ~3.5 s (discovery ≤ 2.5 s + measuring ≤ 0.8 s) |
-| `cleanup_apply` | `{ id, items: string[], keepRecent: bool }` | `{ results: [{ id, removed, skipped, kept_recent, bytes, error? }], items: CleanItem[], took_ms }` (`items` = the cleaned items, re-measured) |
+| `cleanup_scan` | – | `{ id, items: CleanItem[], took_ms, admin, system_drive }` after ≤ ~3.5 s (discovery ≤ 2.5 s + measuring ≤ 0.8 s). `system_drive` = the drive letter of the Windows folder (`"C:"`), or `null` if unknown; the UI uses it for the free-space line of drive C: |
+| `cleanup_apply` | `{ id, items: string[], keepRecent: bool }` | `{ results: [{ id, removed, skipped, skipped_bytes, skipped_recent_bytes, kept_recent, bytes, error? }], items: CleanItem[], took_ms }` (`items` = the cleaned items, re-measured) |
 
 Event `cleanup_item` → `{ scan, item: CleanItem }`: an item that was still `pending` when `cleanup_scan` returned has
 finished measuring. Ignore it if `scan` is not the current scan id.
@@ -336,7 +352,10 @@ recent_files, newest (ms, 0 = none), safety: 'safe'|'caution', default_on, pendi
 - `cleanup_apply` accepts only ids of the LATEST scan (≤ 30 min old) and never paths. It permanently deletes everything
   inside each path (the path itself is kept). Files that are open elsewhere, links (junction/symlink, never followed or
   removed), files without access, and (with `keepRecent`) files changed in the last 24 h are skipped silently and counted
-  in `skipped` / `kept_recent`. `recycle` empties the Recycle Bin of all drives without UI. The scan stays valid; its
+  in `skipped` / `kept_recent`. `skipped_bytes` = size of the files that could not be deleted (in use, no access; not
+  folders or links), `skipped_recent_bytes` = the part of it changed in the last 24 h, counted against the same time mark as
+  the re-measure. Both are 0 when nothing was skipped; the UI (`cleanup.svelte.js`) uses them to show the part of an item that is kept, instead of a misleading 0 B.
+  `recycle` empties the Recycle Bin of all drives without UI. The scan stays valid; its
   cleaned items are replaced by the re-measured ones (the UI does not rescan).
 
 ### Cleanup → AI

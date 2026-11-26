@@ -43,11 +43,14 @@ procs.err.bad_cmdline:
   vi: 'Tiến trình không có dòng lệnh hợp lệ để khởi động lại.'
   en: 'The process has no valid command line to restart with.'
 procs.err.no_shell_token:
-  vi: 'Không lấy được token chưa nâng quyền của Explorer cho người dùng này.'
-  en: 'Could not get Explorer''s non-elevated token for this user.'
+  vi: 'Không tìm thấy tiến trình desktop có quyền tiêu chuẩn của người dùng này.'
+  en: 'Could not find a desktop process running with standard user rights for this user.'
 procs.err.other_session:
   vi: 'Chỉ có thể khởi động lại tiến trình trong cùng phiên đăng nhập.'
   en: 'Only processes in the same logon session can be restarted.'
+procs.err.restart_sandboxed:
+  vi: 'Không thể giữ nguyên giới hạn bảo mật của tiến trình này. Hãy khởi động lại ứng dụng chính.'
+  en: 'Restart the main app instead. This process’s security restrictions cannot be preserved.'
 procs.err.restart_denied:
   vi: 'Không có quyền khởi động lại tiến trình với cùng người dùng và mức nâng quyền.'
   en: 'Not allowed to restart the process with the same user and elevation level.'
@@ -94,20 +97,23 @@ procs.act.open_explorer:
   vi: 'Không mở được tiến trình Explorer'
   en: 'Could not open the Explorer process'
 procs.act.open_explorer_token:
-  vi: 'Không mở được token Explorer'
-  en: 'Could not open the Explorer token'
+  vi: 'Không mở được token của tiến trình'
+  en: 'Could not open the process token'
 procs.act.dup_explorer_token:
   vi: 'Không sao chép được token Explorer'
   en: 'Could not duplicate the Explorer token'
 procs.act.read_token:
   vi: 'Không đọc được thông tin token'
   en: 'Could not read token information'
-procs.act.relaunch_shell:
-  vi: 'Đã kết thúc tiến trình nhưng không khởi động lại được bằng token Explorer'
-  en: 'The process was ended but could not be restarted with the Explorer token'
-procs.act.relaunch:
-  vi: 'Đã kết thúc tiến trình nhưng không khởi động lại được'
-  en: 'The process was ended but could not be restarted'
+procs.err.desktop_launch:
+  vi: 'Chưa kết thúc tiến trình ban đầu. Tạo qua tiến trình cha: %{parent} Dùng token Explorer: %{token}'
+  en: 'The original process was left running. Desktop parent: %{parent} Explorer token: %{token}'
+procs.act.prepare_restart:
+  vi: 'Không tạo được tiến trình thay thế'
+  en: 'Could not create the replacement process'
+procs.act.resume_restart:
+  vi: 'Đã kết thúc tiến trình ban đầu nhưng không chạy được tiến trình thay thế'
+  en: 'The original process was ended but the replacement could not resume'
 procs.act.open_priority:
   vi: 'Không mở được tiến trình để đổi ưu tiên'
   en: 'Could not open the process to change its priority'

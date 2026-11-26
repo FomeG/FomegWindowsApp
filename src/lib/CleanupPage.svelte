@@ -30,7 +30,11 @@
   let tab = $state('all');
   let sort = $state(loadPref('cleanup:sort', { key: 'bytes', desc: true }));
   let focusId = $state(null);
-  let drive = $state(null); // ổ hệ thống: { letter, free, total }
+  let drives = $state.raw([]);
+  const drive = $derived(
+    drives.find((d) => d.ready && d.letter.toUpperCase() === (cleanup.systemDrive || 'C:'))
+      || (!cleanup.systemDrive && drives.find((d) => d.ready && d.kind === 'fixed'))
+  );
   let menu = $state(null);
 
   const columns = $derived([
@@ -46,16 +50,17 @@
   const MARK = String.fromCharCode(1);
   const around = (key, name, params) => t(key, { ...params, [name]: MARK }).split(MARK);
 
-  onMount(() => {
-    cleanup.ensure();
-    api.duDrives().then((ds) => {
-      const sys = ds?.find((d) => d.ready && d.letter.toUpperCase() === 'C:') || ds?.find((d) => d.ready && d.kind === 'fixed');
-      if (sys) drive = sys;
-    }).catch(() => {});
+  onMount(() => cleanup.ensure());
+  $effect(() => {
+    // Đo khi mở trang và khi lệnh dọn trả về, kể cả khi dọn từ đề xuất AI.
+    cleanup.driveRevision;
+    let current = true;
+    api.duDrives().then((ds) => { if (current) drives = ds || []; }).catch(() => {});
+    return () => { current = false; };
   });
 
   const vis = $derived(cleanup.visible);
-  const maxBytes = $derived(Math.max(1, ...vis.map((it) => it.bytes)));
+  const maxBytes = $derived(vis.reduce((max, it) => Math.max(max, cleanup.freeable(it)), 1));
   const inTab = (it, t) => t === 'all' || (t === 'chosen' ? cleanup.chosen.has(it.id) : t === 'cache' ? it.group === 'cache' : it.group !== 'cache');
   const counts = $derived({
     all: vis.length,
@@ -69,7 +74,7 @@
     const { key, desc } = sort;
     const dir = desc ? -1 : 1;
     const GORDER = { temp: 0, system: 1, cache: 2 };
-    const num = (it) => (key === 'bytes' ? (it.pending ? -1 : it.bytes) : it.pending ? -1 : it.files);
+    const num = (it) => it.pending ? -1 : key === 'bytes' ? cleanup.freeable(it) : it.files;
     const cmp =
       key === 'bytes' || key === 'files' ? (a, b) => (num(a) - num(b)) * dir || collator.compare(a.name, b.name)
       : key === 'group' ? (a, b) => (GORDER[a.group] - GORDER[b.group]) * dir || b.bytes - a.bytes
@@ -78,7 +83,7 @@
     return list.sort(cmp);
   });
   const chosen = $derived(cleanup.chosenItems);
-  const chosenBytes = $derived(chosen.reduce((n, it) => n + cleanup.freeable(it), 0));
+  const chosenSize = $derived(cleanup.chosenSize);
   const totalBytes = $derived(vis.reduce((n, it) => n + it.bytes, 0));
   const target = $derived(focusId ? vis.find((it) => it.id === focusId) || null : null);
   const busy = $derived(!!cleanup.phase);
@@ -96,7 +101,7 @@
     const ok = await store.confirm({
       title: t('cleanup.confirm.title', { count: list.length, n: fmtInt(list.length) }),
       message: [
-        t('cleanup.confirm.size', { size: fmtBytes(chosenBytes) + (list.some((it) => it.pending) ? '+' : '') }),
+        list.some((it) => it.pending) ? t('cleanup.confirm.size_pending') : t('cleanup.confirm.size', { size: chosenSize }),
         t(cleanup.keepRecent ? 'cleanup.confirm.skip_keep' : 'cleanup.confirm.skip'),
         recycle ? t('cleanup.confirm.recycle') : '',
       ].filter(Boolean).join(' '),
@@ -156,7 +161,7 @@
             {@const sf = around('cleanup.sum.found', 'bytes')}
             {@const sc = around('cleanup.sum.chosen', 'bytes', { count: chosen.length, n: fmtInt(chosen.length) })}
             {sf[0]}<b>{fmtBytes(totalBytes)}</b>{sf[1]} <span class="dot-sep">|</span>
-            {sc[0]}<b class:warn-text={chosen.length > 0}>{fmtBytes(chosenBytes)}</b>{sc[1]}
+            {sc[0]}<b class:warn-text={chosen.length > 0}>{chosenSize}</b>{sc[1]}
             {#if drive}{@const sd = around('cleanup.sum.drive', 'free', { letter: drive.letter, total: fmtBytes(drive.total) })}<span class="dot-sep">|</span> {sd[0]}<b>{fmtBytes(drive.free)}</b>{sd[1]}{/if}
           {/if}
         </p>
@@ -210,9 +215,10 @@
         {:else if it.error && !it.paths.length && it.id !== 'recycle'}
           <span class="faint small ellipsis" title={it.error}>{t('cleanup.cell.need_admin')}</span>
         {:else}
-          <span class="size-cell">
-            <span class="res-bar thin"><span style="width:{(it.bytes / maxBytes) * 100}%"></span></span>
-            <span class="mono">{fmtBytes(it.bytes)}</span>
+          {@const bytes = cleanup.freeable(it)}
+          <span class="size-cell" title={cleanup.retainedDetails(it).join('\n')}>
+            <span class="res-bar thin"><span style="width:{(bytes / maxBytes) * 100}%"></span></span>
+            <span class="mono">{fmtBytes(bytes)}</span>
           </span>
         {/if}
       {:else if key === 'files'}

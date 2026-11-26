@@ -15,7 +15,7 @@ use std::ffi::c_void;
 use crate::tr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -38,6 +38,8 @@ const SHARE_ALL: u32 = 0x1 | 0x2 | 0x4;
 const OPEN_EXISTING: u32 = 3;
 const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
 const FILE_FULL_DIRECTORY_INFO: i32 = 14;
+const FILE_STANDARD_INFO: i32 = 1;
+const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 const ERROR_NO_MORE_FILES: u32 = 18;
 const ATTR_DIRECTORY: u32 = 0x10;
 const ATTR_REPARSE: u32 = 0x400;
@@ -167,6 +169,8 @@ const NAME_CHUNK: usize = 1 << NAME_BITS;
 const F_DENIED: u8 = 1;
 const F_LINK: u8 = 2;
 const F_REMOVED: u8 = 4;
+/// các tệp TRỰC TIẾP của thư mục đã được liệt kê và cộng vào cây (thư mục con có thể còn đang quét)
+const F_LISTED: u8 = 8;
 
 #[derive(Clone, Copy)]
 struct Dir {
@@ -208,8 +212,9 @@ impl Tree {
     fn get_mut(&mut self, id: u32) -> &mut Dir {
         &mut self.chunks[id as usize / CHUNK][id as usize % CHUNK]
     }
+    /// Nút còn nằm trong cây (chính nó và mọi tổ tiên chưa bị gỡ). Nhánh đã gỡ không còn trả số liệu cũ ra giao diện.
     fn valid(&self, id: u32) -> bool {
-        id < self.len && self.get(id).flags & F_REMOVED == 0
+        id < self.len && !self.detached(id)
     }
     fn push_name(&mut self, s: &str) -> (u32, u16) {
         let b = &s.as_bytes()[..s.len().min(u16::MAX as usize)];
@@ -306,6 +311,18 @@ impl Tree {
             id = d.parent;
         }
     }
+    /// Cộng một độ chênh CÓ DẤU vào thư mục và mọi thư mục cha.
+    fn bubble_delta(&mut self, mut id: u32, size: i64, alloc: i64, files: i64, dirs: i64) {
+        let cl = |v: u32, d: i64| (i64::from(v) + d).clamp(0, i64::from(u32::MAX)) as u32;
+        while id != NONE {
+            let d = self.get_mut(id);
+            d.size = d.size.saturating_add_signed(size);
+            d.alloc = d.alloc.saturating_add_signed(alloc);
+            d.files = cl(d.files, files);
+            d.dirs = cl(d.dirs, dirs);
+            id = d.parent;
+        }
+    }
     /// Một phần việc của `id` xong: giảm `left`, lan lên cha khi về 0.
     fn finish(&mut self, mut id: u32) {
         while id != NONE {
@@ -376,6 +393,32 @@ impl Tree {
             cur = nx;
         }
     }
+}
+
+/// Ghép con của nút `m` (cây chính `t`) với con của nút `sn` (cây phụ `st`) theo tên:
+/// (cặp còn tồn tại, nút phụ mới chưa có ở cây chính, nút chính đã biến mất).
+fn match_kids(t: &Tree, st: &Tree, m: u32, sn: u32) -> (Vec<(u32, u32)>, Vec<u32>, Vec<u32>) {
+    let mut by_name: std::collections::HashMap<&str, u32> = t.kids(m).map(|c| (t.name(c), c)).collect();
+    let (mut matched, mut fresh) = (Vec::new(), Vec::new());
+    for sc in st.kids(sn) {
+        match by_name.remove(st.name(sc)) {
+            Some(mc) => matched.push((mc, sc)),
+            None => fresh.push(sc),
+        }
+    }
+    (matched, fresh, by_name.into_values().collect())
+}
+
+/// Nhánh `id` của `st` có thư mục không đọc được không.
+fn has_denied(st: &Tree, id: u32) -> bool {
+    let mut stack = vec![id];
+    while let Some(c) = stack.pop() {
+        if st.get(c).flags & F_DENIED != 0 {
+            return true;
+        }
+        stack.extend(st.kids(c));
+    }
+    false
 }
 
 fn secs(ms: i64) -> u32 {
@@ -469,6 +512,23 @@ pub struct FilesOut {
     pub total: u32,
     pub items: Vec<FileOut>,
 }
+
+/// Kết quả `Scan::sync_dir` (đưa số liệu một nhánh về đúng với đĩa).
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncResult {
+    /// không còn trên đĩa (hoặc đã không còn trong cây): nhánh được gỡ, số liệu cha đã trừ
+    Gone,
+    /// còn trên đĩa: nhánh đã đo lại, phần chênh đã áp lên các thư mục cha
+    Updated,
+    /// lần quét còn đang chạy ở nhánh này: không làm gì (lần quét sẽ đọc trạng thái hiện tại)
+    Busy,
+    /// không đo được (quá lớn so với thời gian cho phép / không đọc được): số liệu có thể cũ
+    Stale,
+}
+
+/// Đo lại một nhánh tối đa bấy lâu; quá hạn thì giữ số cũ và báo `Stale` (không bao giờ quét lại cả ổ).
+pub const SYNC_BUDGET: Duration = Duration::from_secs(8);
 
 impl Scan {
     /// Bắt đầu quét `root` ở nền; trả về ngay.
@@ -592,6 +652,7 @@ impl Scan {
                         t.get_mut(id).flags |= F_DENIED;
                     }
                     t.bubble(id, sz, al, nf, subs.len() as u32, false);
+                    t.get_mut(id).flags |= F_LISTED;
                     for &(start, len, mtime, link) in &subs {
                         let w = &sub_names[start..start + len];
                         name.clear();
@@ -718,7 +779,22 @@ impl Scan {
         t.valid(id).then(|| t.path(id))
     }
 
+    /// Chỉnh các bộ đếm của `progress()` (tệp / thư mục / byte đã quét) theo thay đổi của cây, để dòng trạng thái
+    /// của trang không giữ số cũ sau khi xoá.
+    fn count(&self, size: i64, files: i64, dirs: i64) {
+        let bump = |a: &AtomicU64, d: i64| {
+            let _ = a.try_update(Ordering::Relaxed, Ordering::Relaxed, |x| Some(x.saturating_add_signed(d)));
+        };
+        bump(&self.bytes, size);
+        bump(&self.files, files);
+        bump(&self.dirs, dirs);
+    }
+
     /// Bỏ thư mục `id` khỏi cây (sau khi đã xoá trên đĩa), trừ số liệu khỏi các thư mục cha.
+    ///
+    /// Nút bị gỡ (và cả nhánh con của nó) chỉ được đánh dấu `F_REMOVED`, KHÔNG tái sử dụng chỗ: luồng quét có thể còn
+    /// giữ id của nhánh đó trong hàng việc. Bộ nhớ đó (56 byte/nút + tên) được trả khi đóng / quét lại; lượng giữ
+    /// lại chỉ bằng những gì người dùng đã xoá hoặc đo lại trong lần quét này.
     pub fn forget(&self, id: u32) {
         let mut t = lock(&self.tree);
         if id == 0 || id >= t.len || t.detached(id) {
@@ -732,15 +808,171 @@ impl Scan {
             // phần chưa quét của nhánh này sẽ không bao giờ báo xong -> cho cha tiến lên
             t.finish(d.parent);
         }
+        drop(t);
+        self.count(-(d.size as i64), -i64::from(d.files), -(i64::from(d.dirs) + 1));
     }
 
     /// Bớt một tệp đã xoá khỏi số liệu của thư mục `id` (tệp trực tiếp = tổng − các con, nên chỉ cần trừ tổng).
+    /// `size` / `alloc` phải là số đã được tính lúc quét (xem `file_sizes`), nếu không "dung lượng trên đĩa" lệch.
     pub fn forget_file(&self, id: u32, size: u64, alloc: u64) {
         let mut t = lock(&self.tree);
         if id >= t.len || t.detached(id) {
             return;
         }
         t.bubble(id, size, alloc, 1, 0, true);
+        drop(t);
+        self.count(-(size as i64), -1, 0);
+    }
+
+    /// Đọc lại CHỈ các tệp trực tiếp của thư mục `id` (một lần `list_dir`, không đi vào thư mục con) và áp phần chênh
+    /// của (tổng, dung lượng trên đĩa, số tệp) lên `id` và mọi thư mục cha. Dùng sau khi xoá tệp: số đọc lại đúng cả khi
+    /// kích thước tệp đã đổi từ lúc quét, hoặc có tệp mới.
+    ///
+    /// `Busy` = thư mục này chưa được lần quét đang chạy liệt kê tệp -> không làm gì (lần quét sẽ đếm đúng trạng thái hiện tại).
+    pub fn resync_files(&self, id: u32) -> SyncResult {
+        let path = {
+            let t = lock(&self.tree);
+            if !t.valid(id) {
+                return SyncResult::Gone;
+            }
+            let d = t.get(id);
+            if d.flags & F_LISTED == 0 {
+                return SyncResult::Busy;
+            }
+            if d.flags & (F_LINK | F_DENIED) != 0 {
+                return SyncResult::Stale;
+            }
+            t.path(id)
+        };
+        let mut p = long_path(&path);
+        p.push(0);
+        let mut buf = vec![0u64; BUF_U64];
+        let (mut nf, mut sz, mut al) = (0u32, 0u64, 0u64);
+        let res = list_dir(&p, &mut buf, |e| {
+            if e.attrs & ATTR_DIRECTORY == 0 {
+                nf += 1;
+                sz += e.size;
+                al += e.alloc;
+            }
+        });
+        if res.is_err() {
+            return SyncResult::Stale;
+        }
+        let mut t = lock(&self.tree);
+        if !t.valid(id) {
+            return SyncResult::Gone;
+        }
+        let own = t.own(id);
+        let (ds, da, df) = (sz as i64 - own.size as i64, al as i64 - own.alloc as i64, i64::from(nf) - i64::from(own.files));
+        t.bubble_delta(id, ds, da, df, 0);
+        drop(t);
+        self.count(ds, df, 0);
+        SyncResult::Updated
+    }
+
+    /// Đo lại CHỈ nhánh `id` trên đĩa (không quét lại cả ổ) và đưa số liệu của nhánh đó, rồi của mọi thư mục cha, về đúng
+    /// với đĩa. Dùng khi một lần xoá chỉ thành công một phần (tệp đang dùng…).
+    ///
+    /// Cách làm: quét thư mục đó bằng một `Scan` phụ tạm (≤ 6 luồng, cùng mã quét), đợi tối đa `budget` (tính từ đầu hàm,
+    /// gồm cả lần liệt kê gốc), rồi dưới khoá cây ĐỒNG BỘ TẠI CHỖ: ghép con theo tên, cập nhật số của nút đã có, chỉ đánh
+    /// dấu `F_REMOVED` các con đã biến mất và chỉ cấp nút mới cho thư mục thật sự mới. Nên sau nhiều lần xoá một phần
+    /// bộ nhớ của cây không tăng (cây phụ bị bỏ ngay), và id của các nút còn lại giữ nguyên (giao diện không mất mở/đóng).
+    pub fn sync_dir(&self, id: u32, budget: Duration) -> SyncResult {
+        let t0 = Instant::now();
+        let (path, d) = {
+            let t = lock(&self.tree);
+            if id >= t.len || t.detached(id) {
+                return SyncResult::Gone;
+            }
+            (t.path(id), *t.get(id))
+        };
+        match std::fs::symlink_metadata(&path) {
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // đã biến mất hẳn (nút gốc của lần quét thì không gỡ được: giao diện đóng lần quét)
+                if id == 0 {
+                    return SyncResult::Stale;
+                }
+                self.forget(id);
+                return SyncResult::Gone;
+            }
+            Err(_) => return SyncResult::Stale,
+        }
+        if d.flags & F_LINK != 0 {
+            return SyncResult::Updated; // không đi theo liên kết: không có gì để đo
+        }
+        if d.left > 0 {
+            return SyncResult::Busy; // lần quét còn đang chạy ở nhánh này, nó sẽ đọc trạng thái mới nhất
+        }
+        let Ok(sub) = Scan::start(0, &path) else { return SyncResult::Stale };
+        while !sub.is_done() {
+            if t0.elapsed() > budget || self.cancel.load(Ordering::Relaxed) {
+                sub.cancel();
+                return SyncResult::Stale; // quá lớn: giữ số cũ, giao diện báo "có thể cũ"
+            }
+            std::thread::sleep(Duration::from_millis(4));
+        }
+        let st = lock(&sub.tree);
+        let mut t = lock(&self.tree);
+        if t.detached(id) {
+            return SyncResult::Gone;
+        }
+        let old = *t.get(id);
+        if old.left > 0 {
+            return SyncResult::Busy;
+        }
+        let new = *st.get(0);
+        // Cây phụ chỉ được thay số cũ khi đọc ĐƯỢC mọi nơi mà cây cũ đọc được: thư mục không đọc được (lỗi / thiếu quyền) mà
+        // cây cũ chưa đánh dấu `denied` nghĩa là số mới thiếu -> giữ số cũ, báo Stale (không ghi đè bằng số thấp hơn).
+        let mut check = vec![(id, 0u32)];
+        while let Some((m, sn)) = check.pop() {
+            let (matched, fresh, _) = match_kids(&t, &st, m, sn);
+            if fresh.iter().any(|&c| has_denied(&st, c)) || matched.iter().any(|&(mc, sc)| st.get(sc).flags & F_DENIED != 0 && t.get(mc).flags & F_DENIED == 0) {
+                return SyncResult::Stale;
+            }
+            check.extend(matched);
+        }
+        let mut stack = vec![(id, 0u32)];
+        while let Some((m, sn)) = stack.pop() {
+            let sd = *st.get(sn);
+            {
+                let n = t.get_mut(m);
+                (n.size, n.alloc, n.files, n.dirs, n.left) = (sd.size, sd.alloc, sd.files, sd.dirs, 0);
+                const KEEP: u8 = F_DENIED | F_LISTED | F_LINK;
+                n.flags = (n.flags & !KEEP) | (sd.flags & KEEP);
+                if m != id {
+                    n.mtime = sd.mtime;
+                }
+            }
+            // ghép con theo tên: còn -> cập nhật tiếp; mất -> gỡ; mới -> cấp nút
+            let (matched, fresh, vanished) = match_kids(&t, &st, m, sn);
+            if !vanished.is_empty() {
+                for &c in &vanished {
+                    t.get_mut(c).flags |= F_REMOVED;
+                }
+                // dựng lại danh sách con chỉ gồm các con còn lại
+                let mut first = NONE;
+                for &(mc, _) in &matched {
+                    t.get_mut(mc).next = first;
+                    first = mc;
+                }
+                t.get_mut(m).first = first;
+            }
+            for sc in fresh {
+                let c = *st.get(sc);
+                let nid = t.add(m, st.name(sc), c.mtime, c.flags & F_LINK != 0);
+                stack.push((nid, sc));
+            }
+            stack.extend(matched);
+        }
+        // phần chênh của cả nhánh lên các thư mục cha (số của chính `id` đã đặt tuyệt đối ở trên)
+        let (ds, da) = (new.size as i64 - old.size as i64, new.alloc as i64 - old.alloc as i64);
+        let (df, dd) = (i64::from(new.files) - i64::from(old.files), i64::from(new.dirs) - i64::from(old.dirs));
+        t.bubble_delta(old.parent, ds, da, df, dd);
+        drop(t);
+        drop(st);
+        self.count(ds, df, dd);
+        SyncResult::Updated
     }
 
     /// Id thư mục có đường dẫn `path` trong cây (không phân biệt hoa thường), None nếu nằm ngoài lần quét.
@@ -992,6 +1224,84 @@ pub fn normalize_abs(p: &str) -> Option<String> {
     (drive || unc).then_some(s)
 }
 
+/// Kích thước của một mục lấy TRƯỚC khi xoá, để trừ đúng khỏi cây quét.
+#[derive(Clone, Copy, Debug)]
+pub struct EntryInfo {
+    pub is_dir: bool,
+    /// EndOfFile (cùng nghĩa với cột "Kích thước" của cây)
+    pub size: u64,
+    /// AllocationSize (cùng nghĩa với "Dung lượng trên đĩa"; làm tròn theo cụm, tệp nén / thưa thì khác `size`)
+    pub alloc: u64,
+}
+
+/// Thông tin mục `path` (không đi theo liên kết). None nếu không có.
+pub fn entry_info(path: &str) -> Option<EntryInfo> {
+    let mut w = long_path(path);
+    w.push(0);
+    unsafe {
+        // quyền 0: chỉ đọc thuộc tính, không tranh chấp với tiến trình đang mở tệp; OPEN_REPARSE_POINT: không vào liên kết
+        let h = CreateFileW(w.as_ptr(), 0, SHARE_ALL, std::ptr::null(), OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, std::ptr::null_mut());
+        if h as isize != -1 {
+            let mut buf = [0u64; 3]; // FILE_STANDARD_INFO: AllocationSize, EndOfFile, Links(4) DeletePending(1) Directory(1)
+            let ok = GetFileInformationByHandleEx(h, FILE_STANDARD_INFO, buf.as_mut_ptr() as *mut c_void, 24) != 0;
+            CloseHandle(h);
+            if ok {
+                let is_dir = (buf[2] >> 40) & 0xff != 0;
+                return Some(EntryInfo { is_dir, size: (buf[1] as i64).max(0) as u64, alloc: (buf[0] as i64).max(0) as u64 });
+            }
+        }
+    }
+    let m = std::fs::symlink_metadata(path).ok()?;
+    Some(EntryInfo { is_dir: m.is_dir(), size: m.len(), alloc: m.len() })
+}
+
+/// Thư mục chứa `p` ("C:\a.txt" -> "C:\", "C:\a\b" -> "C:\a").
+pub fn parent_path(p: &str) -> Option<String> {
+    p.rfind('\\').map(|i| if i == 2 { p[..3].to_owned() } else { p[..i].to_owned() })
+}
+
+impl Scan {
+    /// Cập nhật cây sau khi đã THỬ xoá `path` (`before` lấy trước khi xoá). Chỉ đụng các nút bị ảnh hưởng:
+    /// - thư mục đã mất: `forget` (trừ tổng đang ghi trong cây khỏi mọi thư mục cha);
+    /// - thư mục còn lại một phần (tệp đang dùng…): `sync_dir` đo lại riêng nhánh đó, cập nhật tại chỗ;
+    /// - tệp đã mất: `resync_files` đọc lại tệp trực tiếp của thư mục cha (một lần liệt kê);
+    /// - tệp chưa xoá được: không đổi.
+    ///
+    /// None = đường dẫn nằm ngoài lần quét này, hoặc không có gì để cập nhật (tệp còn nguyên, gốc lần quét).
+    /// `Stale` / `Busy` = số liệu có thể chưa chính xác (xem `SyncResult`).
+    pub fn after_delete(&self, path: &str, before: &EntryInfo) -> Option<SyncResult> {
+        self.sync_path_as(path, before.is_dir, SYNC_BUDGET)
+    }
+
+    /// Như `after_delete` nhưng khi không có `EntryInfo` lấy trước (vd. sau lệnh xoá / cắt của menu Windows, hoặc sau khi
+    /// dọn dẹp): loại mục lấy từ đĩa, nếu đã mất thì từ cây (có nút thư mục = là thư mục). `budget` giới hạn lần đo lại nhánh.
+    pub fn sync_path(&self, path: &str, budget: Duration) -> Option<SyncResult> {
+        let is_dir = match entry_info(path) {
+            Some(i) => i.is_dir,
+            None => self.find(path).is_some(),
+        };
+        self.sync_path_as(path, is_dir, budget)
+    }
+
+    fn sync_path_as(&self, path: &str, is_dir: bool, budget: Duration) -> Option<SyncResult> {
+        let exists = std::fs::symlink_metadata(path).is_ok();
+        if is_dir {
+            let id = self.find(path)?;
+            if id == 0 {
+                return None; // gốc lần quét: người dùng quét lại / đóng
+            }
+            return Some(if exists { self.sync_dir(id, budget) } else { self.forget(id); SyncResult::Gone });
+        }
+        if exists {
+            return None;
+        }
+        // tệp: đọc lại tệp trực tiếp của thư mục cha (không trừ theo kích thước lúc này: tệp có thể đã đổi cỡ từ lúc quét);
+        // cha chưa được lần quét đang chạy liệt kê -> `Busy` (lần quét sẽ đếm đúng, nhưng báo "có thể chưa chính xác")
+        let dir = self.find(&parent_path(path)?)?;
+        Some(self.resync_files(dir))
+    }
+}
+
 /// Tệp nằm trực tiếp trong `dir` (lớn nhất trước, tối đa `limit`).
 pub fn list_files(dir: &str, limit: usize) -> Result<FilesOut, String> {
     let mut p = long_path(dir);
@@ -1202,6 +1512,143 @@ mod tests {
         // tệp trực tiếp
         let f = list_files(root.join("a").to_str().unwrap(), 10).unwrap();
         assert_eq!((f.total, f.items[0].name.as_str(), f.items[0].size), (1, "x.bin", 3000));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Mọi thư mục của cây: (đường dẫn, size, alloc, tệp, thư mục con), sắp theo đường dẫn.
+    fn snapshot(s: &Scan) -> Vec<(String, u64, u64, u64, u32)> {
+        fn walk(s: &Scan, id: u32, out: &mut Vec<(String, u64, u64, u64, u32)>) {
+            let r = s.children(id, "name", false, 10_000).unwrap();
+            out.push((r.path, r.node.size, r.node.alloc, r.node.files, r.node.dirs));
+            for c in r.children {
+                walk(s, c.id, out);
+            }
+        }
+        let mut v = Vec::new();
+        walk(s, 0, &mut v);
+        v.sort();
+        v
+    }
+
+    fn fresh(root: &std::path::Path) -> Arc<Scan> {
+        let s = Scan::start(2, root.to_str().unwrap()).unwrap();
+        wait(&s);
+        s
+    }
+
+    #[test]
+    fn delete_updates_only_the_affected_nodes_like_a_rescan() {
+        let root = tmp("after-delete");
+        let rp = root.to_str().unwrap().to_owned();
+        std::fs::create_dir_all(root.join("a/b")).unwrap();
+        std::fs::create_dir_all(root.join("c/d")).unwrap();
+        std::fs::write(root.join("top.bin"), vec![0u8; 1000]).unwrap();
+        std::fs::write(root.join("a/x.bin"), vec![0u8; 3000]).unwrap();
+        std::fs::write(root.join("a/x2.bin"), vec![0u8; 50]).unwrap();
+        std::fs::write(root.join("a/b/y.bin"), vec![0u8; 5000]).unwrap();
+        std::fs::write(root.join("a/b/keep.bin"), vec![0u8; 700]).unwrap();
+        std::fs::write(root.join("c/z.bin"), vec![0u8; 200]).unwrap();
+        std::fs::write(root.join("c/d/w.bin"), vec![0u8; 4100]).unwrap();
+        let s = Scan::start(1, &rp).unwrap();
+        wait(&s);
+        assert_eq!(snapshot(&s), snapshot(&fresh(&root)));
+        assert_eq!(parent_path(r"C:\a.txt").as_deref(), Some(r"C:\"));
+        assert_eq!(parent_path(r"C:\a\b").as_deref(), Some(r"C:\a"));
+
+        // 1) tệp: kích thước đã đổi từ lúc quét (x.bin 3000 -> 9000, x2.bin 50 -> 80) rồi xoá x.bin: số liệu phải khớp
+        // đĩa (đọc lại tệp của thư mục cha), không phải "trừ 9000 khỏi số cũ 3000"
+        let f = format!(r"{rp}\a\x.bin");
+        let info = entry_info(&f).unwrap();
+        assert!(!info.is_dir && info.size == 3000 && info.alloc >= 3000, "{info:?}");
+        std::fs::write(&f, vec![0u8; 9000]).unwrap();
+        std::fs::write(root.join("a/x2.bin"), vec![0u8; 80]).unwrap();
+        std::fs::remove_file(&f).unwrap();
+        assert_eq!(s.after_delete(&f, &info), Some(SyncResult::Updated));
+        assert_eq!(snapshot(&s), snapshot(&fresh(&root)));
+        // tệp chưa xoá được thì không đổi
+        let top = format!(r"{rp}\top.bin");
+        assert_eq!(s.after_delete(&top, &entry_info(&top).unwrap()), None);
+
+        // 2) thư mục xoá một phần (y.bin đi, keep.bin còn; thêm nhánh mới trong lúc đó): chỉ đo lại "a"
+        let a = format!(r"{rp}\a");
+        let a_info = entry_info(&a).unwrap();
+        assert!(a_info.is_dir);
+        let old_b = s.find(&format!(r"{rp}\a\b")).unwrap();
+        std::fs::remove_file(root.join("a/b/y.bin")).unwrap();
+        std::fs::create_dir_all(root.join("a/n/m")).unwrap();
+        std::fs::write(root.join("a/n/m/q.bin"), vec![0u8; 123]).unwrap();
+        assert_eq!(s.after_delete(&a, &a_info), Some(SyncResult::Updated));
+        assert_eq!(snapshot(&s), snapshot(&fresh(&root)));
+        // "b" vẫn còn trên đĩa nên GIỮ nguyên id (đồng bộ tại chỗ); chỉ "n" và "n\m" là nút mới
+        assert!(s.children(old_b, "size", true, 10).is_some(), "nút còn lại giữ id");
+        let a_id = s.find(&a).unwrap();
+        let r = s.children(a_id, "size", true, 10).unwrap();
+        assert!(r.node.done && r.children.len() == 2);
+        // xoá một phần lặp lại nhiều lần (không có thư mục mới): số nút của cây không tăng
+        let len = lock(&s.tree).len;
+        for i in 0..5 {
+            std::fs::write(root.join(format!("a/b/tmp{i}.bin")), vec![0u8; 10]).unwrap();
+            std::fs::remove_file(root.join(format!("a/b/tmp{i}.bin"))).unwrap();
+            assert_eq!(s.after_delete(&a, &a_info), Some(SyncResult::Updated));
+            assert_eq!(lock(&s.tree).len, len, "lần {i}: cây không được cấp thêm nút");
+        }
+        assert_eq!(snapshot(&s), snapshot(&fresh(&root)));
+        // thư mục con biến mất khỏi đĩa: gỡ khỏi danh sách con, không cấp nút mới
+        std::fs::remove_dir_all(root.join("a/n")).unwrap();
+        assert_eq!(s.after_delete(&a, &a_info), Some(SyncResult::Updated));
+        assert_eq!(lock(&s.tree).len, len);
+        assert_eq!(s.children(a_id, "size", true, 10).unwrap().children.len(), 1);
+        assert_eq!(snapshot(&s), snapshot(&fresh(&root)));
+        // tạo lại "n": đúng hai nút mới (n, m)
+        std::fs::create_dir_all(root.join("a/n/m")).unwrap();
+        std::fs::write(root.join("a/n/m/q.bin"), vec![0u8; 123]).unwrap();
+        assert_eq!(s.after_delete(&a, &a_info), Some(SyncResult::Updated));
+        assert_eq!(lock(&s.tree).len, len + 2);
+        assert_eq!(snapshot(&s), snapshot(&fresh(&root)));
+
+        // 3) thư mục xoá hẳn
+        let c = format!(r"{rp}\c");
+        let c_info = entry_info(&c).unwrap();
+        std::fs::remove_dir_all(root.join("c")).unwrap();
+        assert_eq!(s.after_delete(&c, &c_info), Some(SyncResult::Gone));
+        assert_eq!(snapshot(&s), snapshot(&fresh(&root)));
+        // bộ đếm của dòng trạng thái khớp một lần quét mới
+        let (p, q) = (s.progress(), fresh(&root).progress());
+        assert_eq!((p.files, p.dirs, p.bytes), (q.files, q.dirs, q.bytes));
+        // đo lại rồi xoá "n" (đã ghép từ cây phụ) vẫn đúng
+        let n = format!(r"{rp}\a\n");
+        std::fs::remove_dir_all(root.join("a/n")).unwrap();
+        // loại mục không biết trước (menu Windows / dọn dẹp): đã mất mà cây có nút thư mục -> gỡ nhánh đó
+        assert_eq!(s.sync_path(&n, SYNC_BUDGET), Some(SyncResult::Gone));
+        assert_eq!(snapshot(&s), snapshot(&fresh(&root)));
+        // thư mục cha chưa được lần quét liệt kê tệp: xoá tệp không đụng gì vào cây (lần quét sẽ đếm đúng)
+        let idle = {
+            let mut t = Tree::default();
+            t.add(NONE, &rp, 0, false);
+            Scan {
+                id: 3,
+                root: rp.clone(),
+                tree: Mutex::new(t),
+                queue: Mutex::new(Queue { jobs: Vec::new(), busy: 0 }),
+                wake: Condvar::new(),
+                cancel: AtomicBool::new(false),
+                done: AtomicBool::new(false),
+                started: Instant::now(),
+                elapsed_ms: AtomicU64::new(0),
+                files: AtomicU64::new(0),
+                dirs: AtomicU64::new(0),
+                bytes: AtomicU64::new(0),
+                errors: AtomicU64::new(0),
+            }
+        };
+        assert_eq!(idle.resync_files(0), SyncResult::Busy);
+        let top = format!(r"{rp}\top.bin");
+        let top_info = entry_info(&top).unwrap();
+        std::fs::remove_file(&top).unwrap();
+        assert_eq!(idle.after_delete(&top, &top_info), Some(SyncResult::Busy));
+        assert_eq!(lock(&idle.tree).get(0).size, 0);
+        // đường dẫn ngoài lần quét: không làm gì
+        assert_eq!(s.after_delete(r"Z:\khong\co", &EntryInfo { is_dir: true, size: 0, alloc: 0 }), None);
         let _ = std::fs::remove_dir_all(&root);
     }
 
