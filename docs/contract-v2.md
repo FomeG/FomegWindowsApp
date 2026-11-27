@@ -289,6 +289,21 @@ and marks each row done / failed. The model never acts by itself, and the backen
 To add a kind: register it in `aiActions.js` (title, button, parse), add a handler in `reviewKinds.js`, and teach the
 block in `SYSTEM` (`core/ai.rs`).
 
+## Env (trang Biến môi trường) — `core/env_vars.rs`
+
+| Command | Args | Returns |
+| --- | --- | --- |
+| `env_list` | – | `{ vars: [Var], can_system: bool, took_ms, history: [Change] }` (history oldest first) |
+| `env_set` | `scope: "user"\|"system"`, `name`, `value: string \| null` (null = delete) | `Change \| null` (null = nothing changed) |
+| `env_restore` | `id` | `Change \| null` – puts back `old` of change `id` (recorded with `undo_of`) |
+
+`Var = { name, scope, value (raw, %VAR% unexpanded), expand (REG_EXPAND_SZ), expanded, list, entries: [Entry], secret, protected, issues }`,
+`Entry = { raw, expanded, exists: bool | null (null = not a local path), dup, other (user entry already in the system variable) }`,
+`Change = { id, at (ms), scope, name, old: Val | null, new: Val | null, undo_of? }`, `Val = { value, expand }`.
+Errors (translated): bad scope / name, protected name deleted, value > 32 766 chars, empty Path, missing history id, no admin
+for `system`. After every write the backend broadcasts `WM_SETTINGCHANGE "Environment"`. AI: tool `environment_variables`
+(`name` filter, full output, secrets masked) and the `bien_moi_truong` action block.
+
 ## Apps (trang Ứng dụng) — `core/apps.rs`
 
 ```
@@ -330,7 +345,7 @@ The backend re-reads every entry by `id`; the UI never sends paths or commands t
 | Command | Args | Returns |
 | --- | --- | --- |
 | `cleanup_scan` | – | `{ id, items: CleanItem[], took_ms, admin, system_drive }` after ≤ ~3.5 s (discovery ≤ 2.5 s + measuring ≤ 0.8 s). `system_drive` = the drive letter of the Windows folder (`"C:"`), or `null` if unknown; the UI uses it for the free-space line of drive C: |
-| `cleanup_apply` | `{ id, items: string[], keepRecent: bool }` | `{ results: [{ id, removed, skipped, skipped_bytes, skipped_recent_bytes, kept_recent, bytes, error? }], items: CleanItem[], took_ms }` (`items` = the cleaned items, re-measured) |
+| `cleanup_apply` | `{ id, items: string[], keepRecent: bool, parts?: { [itemId]: number[] } }` (`parts`: only these root indexes of `paths` are cleaned; other listed items are cleaned whole; bad indexes are ignored) | `{ results: [{ id, removed, skipped, skipped_bytes, skipped_recent_bytes, kept_recent, bytes, error? }], items: CleanItem[], took_ms }` (`items` = the cleaned items, re-measured) |
 
 Event `cleanup_item` → `{ scan, item: CleanItem }`: an item that was still `pending` when `cleanup_scan` returned has
 finished measuring. Ignore it if `scan` is not the current scan id.
@@ -342,11 +357,14 @@ atomics once per folder; totals come from the scan and exclude the Recycle Bin (
 The UI (`CleanupProgress.svelte`, a 24 px line above the status bar on the Cleanup page only) caps the bar at 99 %
 until the call returns, then shows the result for 6 s.
 
-`CleanItem`: `{ id, group: 'temp'|'system'|'cache', name, note, paths: string[], bytes, files, recent_bytes,
-recent_files, newest (ms, 0 = none), safety: 'safe'|'caution', default_on, pending, error? }`.
+`CleanItem`: `{ id, group: 'temp'|'system'|'cache'|'dev'|'other' (cache = recognised apps, dev = developer tools / dot-folders, other = unknown programs), parts?: [{ kind: 'cache'|'log'|'crash'|'', bytes, files, recent_bytes, recent_files }] (one per `paths` entry, same order), name, note, paths: string[], bytes, files, recent_bytes,
+recent_files, newest (ms, 0 = none), safety: 'safe'|'caution', default_on, pending, error?, kinds?: ('cache'|'log'|'crash')[],
+icon?: string }`.
 - Ids: fixed ones are `user_temp`, `windows_temp`, `error_reports`, `crash_dumps`, `windows_update`, `delivery_opt`,
   `shader_cache`, `inet_cache`, `recycle`. App caches are `cache:<lower-cased app name>` (e.g. `cache:google chrome`), one
-  item per app with all its cache folders in `paths`.
+  item per app with all its cache, log and crash-report folders in `paths`; `kinds` says which of those it has, `icon` is the
+  installed app's exe / Store logo (load it with `get_icons`), absent when unknown. The name is the installed app's display
+  name when it could be matched (versions stripped), else the folder-based label.
 - Items that need admin (`windows_temp`, `windows_update`, `delivery_opt`) come back with no `paths` and an `error` when
   the app is not elevated. The UI hides `cache` items under 5 MB once measured.
 - `cleanup_apply` accepts only ids of the LATEST scan (≤ 30 min old) and never paths. It permanently deletes everything
