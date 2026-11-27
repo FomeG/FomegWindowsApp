@@ -10,6 +10,10 @@
 //   dùng mở mục "[N tệp]" (list_files), nên quét cả ổ hàng trăm nghìn tệp vẫn nhẹ.
 // - Không đi theo junction / symlink (không đếm trùng, không lặp vô hạn) – giống TreeSize.
 // - Đường dẫn dạng \\?\ để đọc được thư mục sâu > 260 ký tự.
+// - Quét GỐC một ổ NTFS khi có quyền Admin: đọc thẳng MFT (du/mft.rs) – nhanh hơn nhiều lần, ra cùng loại cây;
+//   không dùng được thì tự quay về cách liệt kê ở trên.
+
+mod mft;
 
 use std::ffi::c_void;
 use crate::tr;
@@ -449,6 +453,8 @@ pub struct Scan {
     dirs: AtomicU64,
     bytes: AtomicU64,
     errors: AtomicU64,
+    /// được thử đọc MFT khi `root` là gốc một ổ
+    mft: bool,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -533,6 +539,11 @@ pub const SYNC_BUDGET: Duration = Duration::from_secs(8);
 impl Scan {
     /// Bắt đầu quét `root` ở nền; trả về ngay.
     pub fn start(id: u64, root: &str) -> Result<Arc<Scan>, String> {
+        Self::start_opts(id, root, true)
+    }
+
+    /// `mft = false`: luôn liệt kê từng thư mục (để so sánh trong test).
+    fn start_opts(id: u64, root: &str, mft: bool) -> Result<Arc<Scan>, String> {
         let mut root = root.trim().trim_matches('"').replace('/', "\\");
         if root.len() == 2 && root.ends_with(':') {
             root.push('\\');
@@ -566,6 +577,7 @@ impl Scan {
             dirs: AtomicU64::new(0),
             bytes: AtomicU64::new(0),
             errors: AtomicU64::new(0),
+            mft,
         });
         let s = scan.clone();
         std::thread::Builder::new()
@@ -579,6 +591,30 @@ impl Scan {
         // Đo trên SSD (817k tệp / 130k thư mục): 1 luồng 18 s, 4 luồng 5,5 s, 6 luồng 4,8 s, 8+ luồng chậm lại
         // (nghẽn trong NTFS / bộ lọc Defender). Phần lớn thời gian nằm trong kernel nên không giành CPU của giao diện.
         let n = std::thread::available_parallelism().map_or(2, |n| n.get() / 2).clamp(2, MAX_WORKERS);
+        let letter = if self.mft { mft::drive_letter(&self.root) } else { None };
+        if let Some(l) = letter {
+            match mft::scan(&self, l, n) {
+                Ok(tree) => {
+                    let r = *tree.get(0);
+                    self.files.store(u64::from(r.files), Ordering::Relaxed);
+                    self.dirs.store(u64::from(r.dirs) + 1, Ordering::Relaxed);
+                    self.bytes.store(r.size, Ordering::Relaxed);
+                    *lock(&self.tree) = tree;
+                    self.elapsed_ms.store(self.started.elapsed().as_millis() as u64, Ordering::Relaxed);
+                    self.done.store(true, Ordering::Release);
+                    return;
+                }
+                Err(e) => {
+                    if !e.is_empty() {
+                        super::util::log_line(&format!("du: không đọc được MFT của ổ {l}: ({e}) -> liệt kê từng thư mục"));
+                    }
+                    // số đếm của lần đọc dở được tính lại từ đầu
+                    self.files.store(0, Ordering::Relaxed);
+                    self.dirs.store(0, Ordering::Relaxed);
+                    self.bytes.store(0, Ordering::Relaxed);
+                }
+            }
+        }
         std::thread::scope(|sc| {
             for _ in 0..n {
                 let me = &*self;
@@ -1639,6 +1675,7 @@ mod tests {
                 dirs: AtomicU64::new(0),
                 bytes: AtomicU64::new(0),
                 errors: AtomicU64::new(0),
+                mft: false,
             }
         };
         assert_eq!(idle.resync_files(0), SyncResult::Busy);
