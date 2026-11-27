@@ -937,7 +937,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "fomeg-windows-app"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "rust-i18n",
@@ -953,7 +953,7 @@ dependencies = [
 
 [[package]]
 name = "fomeg-windows-app-mcp"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "fomeg-windows-app",
 ]
