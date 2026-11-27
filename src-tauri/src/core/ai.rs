@@ -55,11 +55,17 @@ Muốn đề xuất kết thúc tiến trình thì thêm MỘT khối mã ngôn 
 (tên exe = mọi tiến trình cùng tên; ứng dụng nhiều tiến trình như trình duyệt, Zalo, Claude thì ghi TÊN EXE MỘT LẦN, \
 không liệt kê từng PID; PID chỉ dùng khi muốn đóng riêng một tiến trình), ví dụ:\n```ket_thuc\n12345 | node.exe treo, ăn 2 GB RAM\n```\n\
 Không đề xuất tiến trình hệ thống (System, csrss, lsass, svchost…) và nhắc dữ liệu chưa lưu sẽ mất. \
+Muốn đề xuất sửa biến môi trường thì thêm MỘT khối mã ngôn ngữ `bien_moi_truong`, mỗi dòng `phạm_vi TÊN thao_tác | lý do ngắn`, \
+phạm vi là `user` (người dùng) hoặc `system` (hệ thống), thao tác là `-= mục` (bỏ một mục khỏi biến danh sách như Path), \
+`+= mục` (thêm mục vào cuối), `= giá trị` (đặt cả giá trị) hoặc `xoa` (xoá biến), ví dụ:\n\
+```bien_moi_truong\nuser Path -= C:\\old\\bin | thư mục không còn tồn tại\nuser JAVA_HOME = C:\\Program Files\\Java\\jdk-21 | trỏ tới JDK đang cài\n```\n\
+Với Path ưu tiên `-=` / `+=` từng mục, không viết lại cả giá trị. Không đề xuất xoá Path, ComSpec, windir hay biến Windows cần; \
+không bao giờ hỏi hay nhắc giá trị bị che (biến bí mật). \
 Mọi khối đều chỉ là gợi ý: ứng dụng kiểm tra lại, người dùng tự chọn và xác nhận.";
 
 /// Thêm vào lời dặn khi bật tool (tra cứu máy).
 const SYSTEM_TOOLS: &str = "Bạn có các công cụ CHỈ ĐỌC để tự tra cứu máy này (tiến trình, cây tiến trình, khởi động, \
-dịch vụ, cổng, ổ đĩa, dọn dẹp, phần cứng, hiệu năng). Khi cần số liệu, hãy gọi công cụ thay vì đoán hay bảo người dùng gửi \
+dịch vụ, cổng, ổ đĩa, dọn dẹp, phần cứng, hiệu năng, biến môi trường). Khi cần số liệu, hãy gọi công cụ thay vì đoán hay bảo người dùng gửi \
 ảnh / danh sách; có thể gọi nhiều công cụ trong một lượt. Ví dụ: tổng RAM của một ứng dụng kèm các tiến trình con \
 (WebView2, trình duyệt) → process_tree; một tiến trình là gì, có an toàn không → process_report; trong một thư mục \
 có gì, cái gì chiếm chỗ (vd. một mục của trang Dọn dẹp) → scan_folder rồi folder_files, TỰ quét chứ không bảo người dùng \
@@ -948,7 +954,7 @@ struct ToolsOnWire<'a> {
 /// vì giao diện nhận diện theo tên đó. Thêm ở cuối để phần đầu (đã cache) không đổi.
 const REPLY_EN: &str = "LANGUAGE: the user's interface is set to English. Reply in English, even though the instructions above and \
 the tool results are in Vietnamese (translate anything you quote). Keep the fenced action-block names (xoa, dong_cong, don_dep, \
-tat_khoi_dong, dich_vu, ket_thuc) and their line formats exactly as specified; only the human-readable reasons may be English.";
+tat_khoi_dong, dich_vu, ket_thuc, bien_moi_truong) and their line formats exactly as specified; only the human-readable reasons may be English.";
 
 fn system_text(tools: bool) -> String {
     let mut s = if tools { format!("{SYSTEM}\n\n{SYSTEM_TOOLS}") } else { SYSTEM.to_owned() };

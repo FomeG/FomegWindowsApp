@@ -11,9 +11,9 @@
   import { t, hasT } from './i18n.svelte.js';
 
   // gợi ý + lời chào theo trang đang mở (ai.help.<trang>, ai.suggest.<trang>.1..n); chip gợi ý được GỬI cho model
-  const SUGGEST_N = { disk: 3, ports: 3, apps: 3, cleanup: 3, general: 4 };
+  const SUGGEST_N = { disk: 3, ports: 3, apps: 3, cleanup: 3, env: 3, general: 4 };
   const helpPage = $derived(
-    ai.diskSuggest ? 'disk' : ai.portsSuggest ? 'ports' : ai.appsSuggest ? 'apps' : ai.cleanupSuggest ? 'cleanup' : 'general'
+    ai.diskSuggest ? 'disk' : ai.portsSuggest ? 'ports' : ai.appsSuggest ? 'apps' : ai.cleanupSuggest ? 'cleanup' : ai.envSuggest ? 'env' : 'general'
   );
   const pageHelp = $derived([
     t(`ai.help.${helpPage}`),

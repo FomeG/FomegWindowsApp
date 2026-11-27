@@ -230,6 +230,14 @@ class Ai {
     this.askNow(q);
   }
 
+  get envSuggest() {
+    return store.page === 'env';
+  }
+  /** Nút "Hỏi AI" của trang Biến môi trường: trợ lý tự đọc biến bằng tool environment_variables (giá trị bí mật bị che). */
+  askEnv(q = t('ai.ask.env')) {
+    this.askNow(q);
+  }
+
   get cleanupSuggest() {
     return store.page === 'cleanup';
   }

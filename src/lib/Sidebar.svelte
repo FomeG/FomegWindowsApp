@@ -11,7 +11,7 @@
 
   const GROUPS = [
     ['monitor', ['dashboard', 'processes', 'performance']],
-    ['system', ['apps', 'startup', 'services', 'ports', 'disk', 'cleanup']],
+    ['system', ['apps', 'startup', 'services', 'ports', 'disk', 'cleanup', 'env']],
   ];
   const ICON = { dashboard: 'overview' };
   // [nhóm, tên nhóm, [[id, nhãn, icon]]] – tính lại khi đổi ngôn ngữ

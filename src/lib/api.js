@@ -116,6 +116,14 @@ export const cleanupScan = () => call('cleanup_scan');
 /** Dọn các mục (theo mã) của lần quét `id`. */
 export const cleanupApply = (id, items, keepRecent) => call('cleanup_apply', { id, items, keepRecent });
 
+// ---------- Biến môi trường (docs/contract-v2.md "Env") ----------
+/** { vars: [Var], can_system, took_ms, history: [Change] } */
+export const envList = () => call('env_list');
+/** Đặt (`value` chuỗi) hoặc xoá (`value` null) biến; trả Change hoặc null nếu không đổi gì. */
+export const envSet = (scope, name, value) => call('env_set', { scope, name, value });
+/** Hoàn tác thay đổi `id` của lịch sử. */
+export const envRestore = (id) => call('env_restore', { id });
+
 // ---------- Ứng dụng đã cài (docs/contract-v2.md "Apps") ----------
 /** { apps: [App], took_ms, store_error } */
 /** force = bỏ bản nhớ, đọc lại hết (nút Làm mới). Không force: backend trả bản nhớ nếu chưa cài / gỡ gì (~1 ms). */

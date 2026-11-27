@@ -1118,6 +1118,26 @@ pub async fn du_pick_folder(window: tauri::WebviewWindow) -> Result<Option<Strin
     on_ui(window, shell::pick_folder).await
 }
 
+// ---------------- Biến môi trường ----------------
+
+/// Biến người dùng + hệ thống đã phân tích (mục Path còn tồn tại / trùng…) + lịch sử thay đổi. ~1–5 ms.
+#[tauri::command]
+pub async fn env_list() -> Result<crate::core::env_vars::ListOut, String> {
+    blocking(crate::core::env_vars::list).await
+}
+
+/// Đặt (`value`) hoặc xoá (`value: null`) biến `name` của `scope` (user|system). None = giá trị không đổi.
+#[tauri::command]
+pub async fn env_set(scope: String, name: String, value: Option<String>) -> Result<Option<crate::core::env_vars::Change>, String> {
+    blocking(move || crate::core::env_vars::set(&scope, &name, value)).await?
+}
+
+/// Hoàn tác thay đổi `id` của lịch sử.
+#[tauri::command]
+pub async fn env_restore(id: u64) -> Result<Option<crate::core::env_vars::Change>, String> {
+    blocking(move || crate::core::env_vars::restore(id)).await?
+}
+
 // ---------------- Cổng (ports) ----------------
 
 /// Cổng TCP đang nghe (và UDP nếu `udp`) kèm tiến trình giữ cổng. Trang Cổng gọi định kỳ khi đang mở.

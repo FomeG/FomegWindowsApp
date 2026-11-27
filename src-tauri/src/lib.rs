@@ -133,7 +133,10 @@ pub fn run(mcp_exe: &'static [u8]) {
             commands::du_exists,
             commands::du_open,
             commands::du_menu,
-            commands::du_pick_folder
+            commands::du_pick_folder,
+            commands::env_list,
+            commands::env_set,
+            commands::env_restore
         ])
         .run(tauri::generate_context!())
         .expect("lỗi khi chạy ứng dụng");

@@ -20,7 +20,7 @@ import * as api from './api.js';
 import { du } from './du.svelte.js';
 import { ai } from './ai.svelte.js';
 import { toasts } from './toasts.svelte.js';
-import { fmtBytes, fmtInt, KIND_LABELS, START_LABELS, STATE_LABELS, CRITICAL } from './format.js';
+import { fmtBytes, fmtInt, errText, KIND_LABELS, START_LABELS, STATE_LABELS, CRITICAL } from './format.js';
 import { endBlocked, relayHint, REACH, PORTS_CHANGED } from './ports.js';
 import { cleanup } from './cleanup.svelte.js';
 import { store } from './store.svelte.js';
@@ -28,6 +28,7 @@ import { procs } from './procs.svelte.js';
 import { OP_LABELS } from './aiActions.js';
 import { apps } from './apps.svelte.js';
 import { i18n, t } from './i18n.svelte.js';
+import { env, entryKey } from './env.svelte.js';
 
 // chữ đổi theo ngôn ngữ: title / hint / doneText / emptyText / options là getter (đọc lúc vẽ popup)
 /** tham số số nhiều: count chọn dạng, n là số đã định dạng */
@@ -255,6 +256,90 @@ const startup = {
 // ---------------- dich_vu: đổi kiểu khởi động / dừng / chạy dịch vụ ----------------
 const svcOf = (name) => {
   const n = name.toLowerCase();
+// ---------------- bien_moi_truong: sửa biến môi trường ----------------
+// Mỗi hàng là một thao tác; khi thực hiện, các thao tác đã tích của CÙNG một biến được gộp và ghi một lần
+// (giá trị đọc lại ngay trước khi ghi, nên sửa tay ở trang trong lúc popup mở vẫn được giữ).
+const envMatch = (v, value) => {
+  const k = entryKey(value);
+  return v.entries.findIndex((e) => e.raw.toLowerCase() === value.toLowerCase() || entryKey(e.expanded) === k || entryKey(e.raw) === k);
+};
+const envVars = {
+  get title() { return t('ai.review.env.title'); },
+  plainLabel: true,
+  get hint() { return t('ai.review.env.hint'); },
+  get doneText() { return t('ai.review.env.done'); },
+  async load(items) {
+    await env.load();
+    return items.map((x) => {
+      const v = env.find(x.scope, x.name);
+      let blocked = '';
+      let sub = '';
+      if (x.scope === 'system' && !env.canSystem) blocked = t('env.need_admin');
+      else if (x.op === 'del') blocked = !v ? t('ai.review.env.not_found') : v.protected ? t('env.protected_tip') : '';
+      else if (x.op === 'remove') {
+        const i = v ? envMatch(v, x.value) : -1;
+        if (!v) blocked = t('ai.review.env.not_found');
+        else if (i < 0) blocked = t('ai.review.env.no_entry');
+        else {
+          const e = v.entries[i];
+          sub = e.dup ? t('env.entry.dup') : e.other ? t('env.entry.other') : e.exists === false ? t('env.entry.missing') : e.exists ? t('env.entry.ok') : '';
+        }
+      } else if (x.op === 'add') {
+        if (v && !v.list && v.value.trim()) blocked = t('ai.review.env.not_list');
+        else if (v && envMatch(v, x.value) >= 0) blocked = t('ai.review.env.already');
+      } else if (x.op === 'set') {
+        if (v && v.value === x.value) blocked = t('ai.review.env.already');
+        else if (v?.secret) sub = t('ai.review.env.secret_set');
+        else if (v) sub = t('ai.review.env.was', { value: v.value.length > 80 ? `${v.value.slice(0, 80)}…` : v.value || '–' });
+      }
+      if (!blocked && x.op === 'set' && x.name.toLowerCase() === 'path') sub = t('ai.review.env.path_set');
+      return { key: x.key, label: x.label, reason: x.reason, sub, icon: x.op === 'del' ? 'delete' : 'bullets', blocked, checked: !blocked, side: t(`env.scope.${x.scope}`), x };
+    });
+  },
+  confirmLabel: (o, n) => t('ai.review.env.confirm') + (n ? ` (${fmtInt(n)})` : ''),
+  summary: (chosen) => t('ai.review.summary_n', cnt(chosen.length)),
+  async run(chosen) {
+    await env.load();
+    const groups = new Map();
+    for (const r of chosen) {
+      const id = `${r.x.scope}:${r.x.name.toLowerCase()}`;
+      if (!groups.has(id)) groups.set(id, []);
+      groups.get(id).push(r);
+    }
+    const out = new Map();
+    for (const rows of groups.values()) {
+      const { scope, name } = rows[0].x;
+      const v = env.find(scope, name);
+      let entries = v ? (v.list ? v.entries.map((e) => e.raw) : v.value ? [v.value] : []) : [];
+      let value = v ? v.value : null;
+      let listy = !v || v.list;
+      for (const { x } of rows) {
+        if (x.op === 'del') { value = null; listy = false; }
+        else if (x.op === 'set') { value = x.value; listy = false; }
+        else if (x.op === 'add') { entries = [...entries, x.value]; listy = true; }
+        else if (x.op === 'remove') {
+          const k = entryKey(x.value);
+          const exp = new Map((v?.entries || []).map((e) => [e.raw, e.expanded]));
+          entries = entries.filter((raw) => raw.toLowerCase() !== x.value.toLowerCase() && entryKey(raw) !== k && entryKey(exp.get(raw) || '') !== k);
+          listy = true;
+        }
+      }
+      const final = listy && !rows.some((r) => r.x.op === 'set' || r.x.op === 'del') ? entries.join(';') : value;
+      try {
+        await env.set(scope, v?.name || name, final, { quiet: true });
+        for (const r of rows) out.set(r.key, { ok: true });
+      } catch (e) {
+        for (const r of rows) out.set(r.key, { ok: false, error: errText(e) });
+      }
+    }
+    return out;
+  },
+  after(ok, fail) {
+    if (ok.length) toasts.success(t('ai.review.env.ok', cnt(ok.length)), [...ok.slice(0, 5).map((r) => r.label), t('env.toast.restart_hint')]);
+    if (fail.length) toasts.error(t('ai.review.env.fail', cnt(fail.length)), fail.slice(0, 5).map((r) => `${r.label}: ${r.error}`));
+  },
+};
+
   const list = store.services;
   return list.find((s) => s.key1.toLowerCase() === n) || list.find((s) => s.name.toLowerCase() === n) || null;
 };
@@ -446,4 +531,4 @@ const uninstall = {
   },
 };
 
-export const REVIEW_KINDS = { go_cai: uninstall, xoa: del, dong_cong: ports, don_dep: clean, tat_khoi_dong: startup, dich_vu: services, ket_thuc: kill };
+export const REVIEW_KINDS = { go_cai: uninstall, xoa: del, dong_cong: ports, don_dep: clean, tat_khoi_dong: startup, dich_vu: services, ket_thuc: kill, bien_moi_truong: envVars };

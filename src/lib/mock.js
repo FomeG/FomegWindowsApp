@@ -840,6 +840,91 @@ export function createMockBackend() {
     }, 2500);
     return { id, admin: true, system_drive: 'C:', took_ms: 1830, items: full.map((x) => (slow.has(x.id) ? { ...x, bytes: 0, files: 0, recent_bytes: 0, recent_files: 0, newest: 0, pending: true } : clone(x))) };
   };
+  // ---------- Biến môi trường (giống core/env_vars.rs) ----------
+  const envVars = {
+    user: [
+      ['Path', String.raw`%USERPROFILE%\AppData\Local\Microsoft\WindowsApps;C:\Users\An\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\An\.cargo\bin;C:\old\tools\bin;C:\WINDOWS\system32;%USERPROFILE%\go\bin`, true],
+      ['GOPATH', String.raw`%USERPROFILE%\go`, true],
+      ['OPENAI_API_KEY', 'sk-mock-1234567890abcdef', false],
+      ['TEMP', String.raw`%USERPROFILE%\AppData\Local\Temp`, true],
+      ['TMP', String.raw`%USERPROFILE%\AppData\Local\Temp`, true],
+      ['OneDrive', String.raw`C:\Users\An\OneDrive`, false],
+    ],
+    system: [
+      ['Path', String.raw`%SystemRoot%\system32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SYSTEMROOT%\System32\WindowsPowerShell\v1.0\;C:\Program Files\nodejs\;C:\Program Files\Git\cmd;C:\Program Files\Docker\Docker\resources\bin;C:\Python27\Scripts`, true],
+      ['ComSpec', String.raw`%SystemRoot%\system32\cmd.exe`, true],
+      ['JAVA_HOME', String.raw`C:\Program Files\Java\jdk-17`, false],
+      ['NUMBER_OF_PROCESSORS', '12', false],
+      ['OS', 'Windows_NT', false],
+      ['PATHEXT', '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.PY', false],
+      ['PROCESSOR_ARCHITECTURE', 'AMD64', false],
+      ['PSModulePath', String.raw`%ProgramFiles%\WindowsPowerShell\Modules;%SystemRoot%\system32\WindowsPowerShell\v1.0\Modules`, true],
+      ['TEMP', String.raw`%SystemRoot%\TEMP`, true],
+      ['windir', '%SystemRoot%', true],
+    ],
+  };
+  const envExpandMap = { USERPROFILE: String.raw`C:\Users\An`, SYSTEMROOT: String.raw`C:\WINDOWS`, PROGRAMFILES: String.raw`C:\Program Files` };
+  const envMissing = [String.raw`c:\old\tools\bin`, String.raw`c:\python27\scripts`, String.raw`c:\program files\java\jdk-17`];
+  const envExpand = (s) => s.replace(/%([^%]+)%/g, (m, n) => envExpandMap[n.toUpperCase()] ?? m);
+  const envKey = (s) => envExpand(s).trim().replace(/[\\/]+$/, '').toLowerCase();
+  const envLooksPath = (s) => /^[a-z]:[\\/]/i.test(s) || s.startsWith('\\\\');
+  const envList = /^(path|psmodulepath|pathext|classpath|pythonpath|include|lib|libpath|node_path)$/i;
+  const envProtected = /^(path|pathext|comspec|windir|systemroot|os|psmodulepath|temp|tmp|username|driverdata|number_of_processors|processor_\w+)$/i;
+  let envHistory = [];
+  const envErr = (vi, en) => new Error(i18n.locale === 'en' ? en : vi);
+  function envBuild() {
+    const sysLists = new Map(envVars.system.filter(([n]) => envList.test(n)).map(([n, v]) => [n.toUpperCase(), new Set(v.split(';').filter(Boolean).map(envKey))]));
+    const out = [];
+    for (const scope of ['user', 'system']) {
+      for (const [name, value, expand] of envVars[scope]) {
+        const list = envList.test(name) || (value.includes(';') && value.split(';').filter(Boolean).every((x) => envLooksPath(x) || x.startsWith('%')));
+        const seen = new Set();
+        const other = scope === 'user' ? sysLists.get(name.toUpperCase()) : null;
+        const entries = list
+          ? value.split(';').map((x) => x.trim()).filter(Boolean).map((raw) => {
+              const expanded = envExpand(raw);
+              const key = envKey(raw);
+              const e = { raw, expanded, exists: envLooksPath(expanded) ? !envMissing.includes(key) : null, dup: seen.has(key), other: !!other?.has(key) };
+              seen.add(key);
+              return e;
+            })
+          : [];
+        out.push({
+          name, scope, value, expand, expanded: expand ? envExpand(value) : value, list, entries,
+          secret: /KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL|AUTH|PRIVATE|COOKIE|SESSION/i.test(name),
+          protected: envProtected.test(name),
+          issues: entries.filter((e) => e.exists === false || e.dup || e.other).length,
+        });
+      }
+    }
+    return out;
+  }
+  handlers.env_list = async () => { await sleep(40); return { vars: envBuild(), can_system: true, took_ms: 3, history: clone(envHistory) }; };
+  function envApply(scope, name, value, undoOf) {
+    const list = envVars[scope];
+    if (!list) throw envErr('Phạm vi không hợp lệ.', 'Invalid scope.');
+    if (!name || /[=]/.test(name) || name.trim() !== name) throw envErr('Tên biến không hợp lệ.', 'Invalid variable name.');
+    const i = list.findIndex(([n]) => n.toLowerCase() === name.toLowerCase());
+    const old = i >= 0 ? { value: list[i][1], expand: list[i][2] } : null;
+    if (value == null && envProtected.test(name)) throw envErr(`Không xoá được ${name}: Windows và nhiều chương trình cần biến này.`, `Can’t delete ${name}: Windows and many programs need it.`);
+    if (value != null && /^path$/i.test(name) && !value.replace(/;/g, '').trim()) throw envErr('Không để trống Path.', 'Path can’t be empty.');
+    const nv = value == null ? null : { value, expand: value.includes('%') || !!old?.expand };
+    if (JSON.stringify(old) === JSON.stringify(nv)) return null;
+    if (nv == null) list.splice(i, 1);
+    else if (i >= 0) list[i] = [list[i][0], nv.value, nv.expand];
+    else list.push([name, nv.value, nv.expand]);
+    const c = { id: (envHistory.at(-1)?.id || 0) + 1, at: Date.now(), scope, name: i >= 0 ? list[i]?.[0] || name : name, old, new: nv, ...(undoOf ? { undo_of: undoOf } : {}) };
+    envHistory = [...envHistory, c].slice(-100);
+    return c;
+  }
+  handlers.env_set = async ({ scope, name, value }) => { await sleep(60); return envApply(scope, name, value); };
+  handlers.env_restore = async ({ id }) => {
+    await sleep(60);
+    const c = envHistory.find((x) => x.id === id);
+    if (!c) throw envErr('Không tìm thấy thay đổi này trong lịch sử.', 'This change is not in the history.');
+    return envApply(c.scope, c.name, c.old?.value ?? null, id);
+  };
+
   handlers.cleanup_apply = async ({ id, items, keepRecent }) => {
     if (id !== cleanupId || !cleanupItems) throw 'Kết quả quét đã cũ. Hãy quét lại trước khi dọn.';
     const results = [];
