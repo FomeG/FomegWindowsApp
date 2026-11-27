@@ -114,7 +114,8 @@ export const duPickFolder = () => call('du_pick_folder');
 // Dọn dẹp: quét trả kết quả sau ~2 s; mục đo xong sau đó đến qua sự kiện 'cleanup_item' { scan, item }.
 export const cleanupScan = () => call('cleanup_scan');
 /** Dọn các mục (theo mã) của lần quét `id`. */
-export const cleanupApply = (id, items, keepRecent) => call('cleanup_apply', { id, items, keepRecent });
+/** `parts`: { id: [chỉ số thư mục gốc] } cho mục chỉ dọn một phần (mục khác dọn hết). */
+export const cleanupApply = (id, items, keepRecent, parts = {}) => call('cleanup_apply', { id, items, keepRecent, parts });
 
 // ---------- Biến môi trường (docs/contract-v2.md "Env") ----------
 /** { vars: [Var], can_system, took_ms, history: [Change] } */

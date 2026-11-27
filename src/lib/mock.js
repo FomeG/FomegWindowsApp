@@ -699,12 +699,26 @@ export function createMockBackend() {
   const NOTE_APP = 'Thư mục cache của ứng dụng (Cache, Code Cache, GPUCache…). Ứng dụng tự tạo lại; lần mở đầu có thể chậm hơn một chút. Tệp đang dùng được bỏ qua.';
   const NOTE_BROWSER = 'Cache trình duyệt (ảnh, script, video của trang web đã tải). Không mất mật khẩu, lịch sử hay dấu trang. Đóng trình duyệt trước để dọn được nhiều hơn.';
   const NOTE_DEV = 'Cache của công cụ lập trình (gói, bản build đã tải). Xoá an toàn nhưng lần build / cài sau phải tải lại, có thể mất thời gian và dung lượng mạng.';
+  // nhóm cache của app gồm những gì (backend `kinds`: cache | log | crash), như core/cleanup.rs
+  const MOCK_KINDS = { 'cache:google chrome': ['cache', 'crash'], 'cache:microsoft edge': ['cache', 'log', 'crash'], 'cache:vs code': ['cache', 'log', 'crash'], 'cache:discord': ['cache', 'log', 'crash'], 'cache:spotify': ['cache', 'log'] };
   const cleanupBase = () => {
     const day = Date.now() - 3 * 864e5;
-    const it = (id, group, name, note, paths, bytes, files, recent, safety, on, error = null) => ({
-      id, group, name, note, paths, bytes, files, recent_bytes: recent, recent_files: recent ? Math.ceil(files / 20) : 0,
-      newest: files ? day : 0, safety, default_on: on, pending: false, error,
-    });
+    const it = (id, group, name, note, paths, bytes, files, recent, safety, on, error = null) => {
+      // nhóm tìm được: thêm thư mục log / báo cáo lỗi cạnh thư mục cache đầu tiên, số liệu từng thư mục (`parts`)
+      const kinds = group === 'cache' || group === 'dev' || group === 'other' ? MOCK_KINDS[id] || ['cache'] : null;
+      const base = paths[0]?.slice(0, paths[0].lastIndexOf('\\')) || '';
+      const all = kinds ? [...paths, ...(kinds.includes('log') ? [base + '\\logs'] : []), ...(kinds.includes('crash') ? [base + '\\Crashpad'] : [])] : paths;
+      const share = all.map((p, k) => (k < paths.length ? 0.85 / paths.length : (0.15 * (all.length - paths.length === 2 && p.endsWith('Crashpad') ? 1 / 3 : all.length - paths.length === 2 ? 2 / 3 : 1))));
+      const parts = all.map((p, k) => ({
+        kind: !kinds ? '' : k < paths.length ? 'cache' : p.endsWith('Crashpad') ? 'crash' : 'log',
+        bytes: Math.round(bytes * share[k]), files: Math.max(1, Math.round(files * share[k])), recent_bytes: Math.round(recent * share[k]), recent_files: recent ? 1 : 0,
+      }));
+      return {
+        id, group, name, note, paths: all, bytes, files, recent_bytes: recent, recent_files: recent ? Math.ceil(files / 20) : 0,
+        newest: files ? day : 0, safety, default_on: on, pending: false, error, parts,
+        ...(kinds ? { kinds } : {}),
+      };
+    };
     return [
       it('user_temp', 'temp', 'Tệp tạm của bạn', 'Thư mục %TEMP%: tệp tạm của chương trình và bộ cài. Windows và ứng dụng tự tạo lại khi cần.', [L + '\\Temp'], 4.6 * GB, 24919, 320 * MB, 'safe', true),
       it('windows_temp', 'temp', 'Tệp tạm của Windows', 'Windows\\Temp: tệp tạm của Windows, dịch vụ và bộ cài chạy quyền hệ thống.', ['C:\\Windows\\Temp'], 612 * MB, 1840, 12 * MB, 'safe', true),
@@ -720,10 +734,10 @@ export function createMockBackend() {
       it('cache:vs code', 'cache', 'VS Code', NOTE_APP, [R + '\\Code\\Cache', R + '\\Code\\CachedData', R + '\\Code\\Code Cache', R + '\\Code\\GPUCache'], 610 * MB, 1320, 30 * MB, 'safe', false),
       it('cache:discord', 'cache', 'Discord', NOTE_APP, [R + '\\discord\\Cache', R + '\\discord\\Code Cache', R + '\\discord\\GPUCache'], 245 * MB, 980, 8 * MB, 'safe', false),
       it('cache:spotify', 'cache', 'Spotify', NOTE_APP, [L + '\\Spotify\\Data'], 1.1 * GB, 3100, 60 * MB, 'safe', false),
-      it('cache:npm', 'cache', 'npm', NOTE_DEV, [L + '\\npm-cache'], 2.4 * GB, 51000, 0, 'caution', false),
-      it('cache:gradle', 'cache', 'Gradle', NOTE_DEV, ['C:\\Users\\An\\.gradle\\caches'], 3.9 * GB, 82000, 0, 'caution', false),
-      it('cache:uv', 'cache', 'uv', NOTE_DEV, [L + '\\uv\\cache'], 9.7 * GB, 1250000, 0, 'caution', false),
-      it('cache:~/.cache', 'cache', '~/.cache', 'Thư mục cache chung của nhiều công cụ; có thể chứa mô hình AI đã tải (Hugging Face, LM Studio…) rất lớn. Xoá thì lần dùng sau phải tải lại.', ['C:\\Users\\An\\.cache'], 14.2 * GB, 640, 0, 'caution', false),
+      it('cache:npm', 'dev', 'npm', NOTE_DEV, [L + '\\npm-cache'], 2.4 * GB, 51000, 0, 'caution', false),
+      it('cache:gradle', 'dev', 'Gradle', NOTE_DEV, ['C:\\Users\\An\\.gradle\\caches'], 3.9 * GB, 82000, 0, 'caution', false),
+      it('cache:uv', 'dev', 'uv', NOTE_DEV, [L + '\\uv\\cache'], 9.7 * GB, 1250000, 0, 'caution', false),
+      it('cache:~/.cache', 'dev', '~/.cache', 'Thư mục cache chung của nhiều công cụ; có thể chứa mô hình AI đã tải (Hugging Face, LM Studio…) rất lớn. Xoá thì lần dùng sau phải tải lại.', ['C:\\Users\\An\\.cache'], 14.2 * GB, 640, 0, 'caution', false),
     ];
   };
   // ---------- Ứng dụng đã cài ----------
@@ -826,20 +840,6 @@ export function createMockBackend() {
   };
   handlers.leftovers_forget = async ({ name }) => { leftList = leftList.filter((f) => f.owner !== name); };
 
-  handlers.cleanup_scan = async () => {
-    await sleep(900);
-    const id = ++cleanupId;
-    const full = cleanupItems || cleanupBase().map((x) => x.id === 'user_temp'
-      ? { ...x, bytes: 2 * GB, recent_bytes: 2 * GB, recent_files: x.files, newest: Date.now() }
-      : x);
-    cleanupItems = full;
-    const slow = new Set(['cache:uv', 'cache:gradle']);
-    setTimeout(() => {
-      if (cleanupId !== id) return;
-      for (const x of cleanupItems) if (slow.has(x.id)) emit('cleanup_item', { scan: id, item: clone(x) });
-    }, 2500);
-    return { id, admin: true, system_drive: 'C:', took_ms: 1830, items: full.map((x) => (slow.has(x.id) ? { ...x, bytes: 0, files: 0, recent_bytes: 0, recent_files: 0, newest: 0, pending: true } : clone(x))) };
-  };
   // ---------- Biến môi trường (giống core/env_vars.rs) ----------
   const envVars = {
     user: [
@@ -925,12 +925,34 @@ export function createMockBackend() {
     return envApply(c.scope, c.name, c.old?.value ?? null, id);
   };
 
-  handlers.cleanup_apply = async ({ id, items, keepRecent }) => {
+  handlers.cleanup_scan = async () => {
+    await sleep(900);
+    const id = ++cleanupId;
+    const full = cleanupItems || cleanupBase().map((x) => x.id === 'user_temp'
+      ? { ...x, bytes: 2 * GB, recent_bytes: 2 * GB, recent_files: x.files, newest: Date.now() }
+      : x);
+    cleanupItems = full;
+    const slow = new Set(['cache:uv', 'cache:gradle']);
+    setTimeout(() => {
+      if (cleanupId !== id) return;
+      for (const x of cleanupItems) if (slow.has(x.id)) emit('cleanup_item', { scan: id, item: clone(x) });
+    }, 2500);
+    return { id, admin: true, system_drive: 'C:', took_ms: 1830, items: full.map((x) => (slow.has(x.id) ? { ...x, bytes: 0, files: 0, recent_bytes: 0, recent_files: 0, newest: 0, pending: true } : clone(x))) };
+  };
+  handlers.cleanup_apply = async ({ id, items, keepRecent, parts = {} }) => {
     if (id !== cleanupId || !cleanupItems) throw 'Kết quả quét đã cũ. Hãy quét lại trước khi dọn.';
     const results = [];
     const fresh = cleanupItems.filter((x) => items.includes(x.id)).map((x) => {
       const result = { id: x.id, removed: 0, skipped: 0, kept_recent: 0, bytes: 0, skipped_bytes: 0, skipped_recent_bytes: 0, error: null };
       results.push(result);
+      // dọn một phần: chỉ các thư mục đã chọn về 0 (giả lập đơn giản, không có tệp bị khoá)
+      const sel = parts[x.id]?.filter((k) => k < x.paths.length);
+      if (sel) {
+        const ps = x.parts.map((p, k) => (sel.includes(k) ? { ...p, bytes: 0, files: 0, recent_bytes: 0, recent_files: 0 } : p));
+        const gone = sel.reduce((n, k) => n + x.parts[k].bytes, 0);
+        Object.assign(result, { removed: sel.reduce((n, k) => n + x.parts[k].files, 0), bytes: gone });
+        return { ...x, parts: ps, bytes: x.bytes - gone, files: ps.reduce((n, p) => n + p.files, 0), recent_bytes: ps.reduce((n, p) => n + p.recent_bytes, 0), recent_files: ps.reduce((n, p) => n + p.recent_files, 0) };
+      }
       if (x.id === 'recycle') {
         result.removed = x.files;
         result.bytes = x.bytes;
@@ -954,7 +976,9 @@ export function createMockBackend() {
         removed: x.files - files, skipped: lockedOld + lockedRecent, kept_recent: keepRecent ? recentFiles : 0,
         bytes: x.bytes - bytes, skipped_bytes: lockedOldBytes + lockedRecentBytes, skipped_recent_bytes: lockedRecentBytes,
       });
-      return { ...x, bytes, files, recent_bytes: recentBytes, recent_files: recentFiles, newest: files ? x.newest : 0 };
+      const ratio = x.bytes ? bytes / x.bytes : 0;
+      const ps = x.parts?.map((p) => ({ ...p, bytes: Math.round(p.bytes * ratio), files: Math.round(p.files * ratio), recent_bytes: Math.round(p.recent_bytes * ratio) }));
+      return { ...x, bytes, files, recent_bytes: recentBytes, recent_files: recentFiles, newest: files ? x.newest : 0, ...(ps ? { parts: ps } : {}) };
     });
     // Giả lập tiến độ dựa trên số tệp đã xử lý và số byte thực sự xoá.
     const picked = cleanupItems.filter((x) => items.includes(x.id) && x.id !== 'recycle');

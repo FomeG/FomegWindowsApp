@@ -618,3 +618,25 @@ table.tools td:last-child { width: 1%; }
 .env-hist { align-items: center; }
 .env-hist .link-row { flex: 1; min-width: 0; margin: 0; width: auto; }
 .env-hist .btn { flex: none; }
+.cl-big { display: inline-flex; align-items: center; gap: 6px; }
+.cl-big img { flex: none; }
+/* Dọn dẹp: cây chọn phần cần dọn (CleanupTree) + chân dính ở đáy ngăn chi tiết */
+.cl-tree .res-head .link-btn:disabled { color: var(--faint); cursor: default; text-decoration: none; }
+.clt, .clt ul { list-style: none; margin: 0; padding: 0; }
+.clt ul { padding-left: 18px; }
+.clt-row { display: flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 4px; margin: 0 -4px; border-radius: 5px; font-size: 12.5px; }
+.clt-row:hover { background: var(--panel-3); }
+.clt-row.dir.on { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.clt-row input[type="checkbox"] { flex: none; margin: 0; }
+.clt-tw { flex: none; display: inline-grid; place-items: center; width: 16px; height: 18px; border: 0; padding: 0; background: none; color: var(--faint); cursor: pointer; }
+.clt-tw:hover { color: var(--text); }
+.clt-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; border: 0; padding: 0; background: none; color: var(--text); text-align: left; font: inherit; cursor: pointer; }
+.clt-name.mono { font-family: var(--mono); font-size: 11.5px; }
+.clt-size { flex: none; font-size: 11.5px; }
+.clt-open { opacity: 0; flex: none; }
+.clt-row:hover .clt-open, .clt-row:focus-within .clt-open { opacity: 1; }
+.clt-files { padding-left: 38px !important; margin: 0 0 4px; display: flex; flex-direction: column; gap: 1px; }
+.clt-files li { min-height: 20px; display: flex; align-items: center; gap: 6px; font-size: 11.5px; }
+.clt-file .ellipsis { flex: 1; min-width: 0; }
+.cl-foot { position: sticky; bottom: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); box-shadow: 0 -6px 12px -8px rgba(0, 0, 0, 0.35); }
+.nowrap { white-space: nowrap; }

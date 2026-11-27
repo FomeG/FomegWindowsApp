@@ -7,7 +7,8 @@
   import { onMount, tick } from 'svelte';
   import { store } from './store.svelte.js';
   import { ai } from './ai.svelte.js';
-  import { cleanup, GROUP_LABELS, SAFETY } from './cleanup.svelte.js';
+  import { cleanup, GROUP_LABELS, SAFETY, partsText } from './cleanup.svelte.js';
+  import { procs } from './procs.svelte.js';
   import * as api from './api.js';
   import { collator, fmtBytes, fmtInt, errText } from './format.js';
   import { t } from './i18n.svelte.js';
@@ -61,12 +62,17 @@
 
   const vis = $derived(cleanup.visible);
   const maxBytes = $derived(vis.reduce((max, it) => Math.max(max, cleanup.freeable(it)), 1));
-  const inTab = (it, t) => t === 'all' || (t === 'chosen' ? cleanup.chosen.has(it.id) : t === 'cache' ? it.group === 'cache' : it.group !== 'cache');
+  // tab = nhóm của backend (temp | system | cache = ứng dụng | dev | other), cộng "Tất cả" và "Đã chọn"
+  const TABS = ['temp', 'system', 'cache', 'dev', 'other'];
+  const inTab = (it, t) => t === 'all' || (t === 'chosen' ? cleanup.chosen.has(it.id) : it.group === t);
   const counts = $derived({
     all: vis.length,
-    sys: vis.filter((it) => it.group !== 'cache').length,
-    cache: vis.filter((it) => it.group === 'cache').length,
+    ...Object.fromEntries(TABS.map((g) => [g, vis.filter((it) => it.group === g).length])),
     chosen: vis.filter((it) => cleanup.chosen.has(it.id)).length,
+  });
+  // tab cũ đã lưu ('sys') hoặc tab trống: về Tất cả
+  $effect(() => {
+    if (tab !== 'all' && tab !== 'chosen' && !counts[tab] && cleanup.scanId) tab = 'all';
   });
   const rows = $derived.by(() => {
     const needle = q.trim().toLowerCase();
@@ -186,7 +192,7 @@
         label={t('cleanup.tabs.label')}
         value={tab}
         onchange={(v) => (tab = v)}
-        items={[['all', t('cleanup.tabs.all'), counts.all], ['sys', t('cleanup.tabs.sys'), counts.sys], ['cache', t('cleanup.tabs.cache'), counts.cache], ['chosen', t('cleanup.tabs.chosen'), counts.chosen]]}
+        items={[['all', t('cleanup.tabs.all'), counts.all], ...TABS.filter((g) => counts[g]).map((g) => [g, t(`cleanup.tabs.${g}`), counts[g]]), ['chosen', t('cleanup.tabs.chosen'), counts.chosen]]}
       />
       <span class="grow"></span>
       <label class="check" title={t('cleanup.keep_recent_tip')}>
@@ -203,12 +209,14 @@
 
     {#snippet cell(it, key)}
       {#if key === 'name'}
+        {@const img = (procs.iconV, it.icon ? procs.icons.get(it.icon) : null)}
         <span class="cell-name ellipsis" title={it.note}>
-          <FsIcon kind={it.id === 'recycle' ? 'recycle' : 'folder'} />
+          {#if img}<span class="app-ico"><img src={img} width="16" height="16" alt="" /></span>{:else}<FsIcon kind={it.id === 'recycle' ? 'recycle' : 'folder'} />{/if}
           <span class="ellipsis" class:muted={!canPick(it)}>{it.name}</span>
+          {#if cleanup.parts.has(it.id)}<span class="faint small nowrap" title={t('cleanup.cell.partial_tip')}>{t('cleanup.cell.partial')}</span>{/if}
         </span>
       {:else if key === 'group'}
-        <span class="muted">{GROUP_LABELS[it.group]}</span>
+        <span class="muted ellipsis" title={it.kinds?.length ? partsText(it) : ''}>{it.kinds?.length ? partsText(it) : GROUP_LABELS[it.group]}</span>
       {:else if key === 'bytes'}
         {#if it.pending}
           <span class="faint small"><span class="spin xs"></span> {t('cleanup.cell.measuring')}</span>

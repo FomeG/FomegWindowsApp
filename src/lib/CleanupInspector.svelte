@@ -2,7 +2,8 @@
   // Ngăn chi tiết trang Dọn dẹp (khung InspectorShell dùng chung).
   // - Có mục đang trỏ -> dung lượng dọn được, phần giữ lại, mức an toàn, các thư mục, kết quả lần dọn trước.
   // - Không có -> tổng quan: tổng tìm thấy / đã chọn, theo nhóm, lớn nhất (bấm để xem).
-  import { cleanup, GROUP_LABELS, SAFETY } from './cleanup.svelte.js';
+  import { cleanup, GROUP_LABELS, SAFETY, partsText } from './cleanup.svelte.js';
+  import { procs } from './procs.svelte.js';
   import { C } from './colors.js';
   import { fmtBytes, fmtInt } from './format.js';
   import { t, i18n } from './i18n.svelte.js';
@@ -11,6 +12,7 @@
   import Glyph from './Glyph.svelte';
   import FsIcon from './FsIcon.svelte';
   import Toggle from './Toggle.svelte';
+  import CleanupTree from './CleanupTree.svelte';
 
   let { item = null, overlay = false, onclose, onpick, onopen, onask } = $props();
 
@@ -21,10 +23,11 @@
   // ---------- tổng quan ----------
   const vis = $derived(cleanup.visible);
   const groups = $derived(
-    ['temp', 'system', 'cache'].map((g) => {
+    ['temp', 'system', 'cache', 'dev', 'other'].map((g) => {
       const list = vis.filter((it) => it.group === g);
-      return [GROUP_LABELS[g], list.reduce((n, it) => n + it.bytes, 0), list.length, g === 'cache' ? C.gpu : g === 'temp' ? C.cpu : C.mem];
-    })
+      const col = { temp: C.cpu, system: C.mem, cache: C.gpu, dev: C.disk, other: C.net || C.disk };
+      return [GROUP_LABELS[g], list.reduce((n, it) => n + it.bytes, 0), list.length, col[g]];
+    }).filter((g) => g[2] > 0)
   );
   const groupMax = $derived(Math.max(1, ...groups.map((g) => g[1])));
   const biggest = $derived(vis.filter((it) => !it.pending).sort((a, b) => b.bytes - a.bytes).slice(0, 6));
@@ -33,16 +36,20 @@
 
 {#if item}
   <InspectorShell label={t('cleanup.insp.label')} kicker={t('cleanup.insp.label')} title={item.name} titleTip={item.paths[0] || item.name} {overlay} {onclose}>
-    {#snippet icon()}<FsIcon kind={item.id === 'recycle' ? 'recycle' : 'folder'} size={18} />{/snippet}
+    {#snippet icon()}
+      {@const img = (procs.iconV, item.icon ? procs.icons.get(item.icon) : null)}
+      {#if img}<img src={img} width="20" height="20" alt="" />{:else}<FsIcon kind={item.id === 'recycle' ? 'recycle' : 'folder'} size={18} />{/if}
+    {/snippet}
     {#snippet sub()}
       <span>{GROUP_LABELS[item.group]}</span>
+      {#if item.kinds?.length}<span title={t('cleanup.insp.parts_tip')}>{partsText(item)}</span>{/if}
       <span class="safety {SAFETY[item.safety][1]}">{SAFETY[item.safety][0]}</span>
       {#if item.default_on}<span>{t('cleanup.insp.preselected')}</span>{/if}
     {/snippet}
     {#snippet actions()}
       <span class="insp-ctl">
         <Toggle on={cleanup.chosen.has(item.id)} disabled={!canPick(item) || !!cleanup.phase} label={t('cleanup.insp.pick_label', { name: item.name })} onchange={(v) => cleanup.toggle(item.id, v)} />
-        <span class="small" class:muted={!cleanup.chosen.has(item.id)}>{cleanup.chosen.has(item.id) ? t('cleanup.insp.will_clean') : t('cleanup.insp.wont_clean')}</span>
+        <span class="small" class:muted={!cleanup.chosen.has(item.id)}>{cleanup.parts.has(item.id) ? t('cleanup.insp.will_clean_part') : cleanup.chosen.has(item.id) ? t('cleanup.insp.will_clean') : t('cleanup.insp.wont_clean')}</span>
       </span>
       <span class="insp-act-break"></span>
       <button type="button" class="btn sm" onclick={() => onopen(item.paths[0])} disabled={!item.paths.length}><Glyph name="folder" size={12} /> {t('cleanup.insp.open')}</button>
@@ -71,15 +78,9 @@
       </section>
     {/if}
 
-    {#if item.paths.length}
-      <div class="cmd-block">
-        <div class="cmd-head"><span class="lbl">{item.paths.length > 1 ? t('cleanup.insp.folders', { n: fmtInt(item.paths.length) }) : t('cleanup.insp.folder')}</span></div>
-        <div class="clean-paths">
-          {#each item.paths as p (p)}
-            <button type="button" class="link-row mono small" onclick={() => onopen(p)} title={t('cleanup.insp.open_tip')}><FsIcon kind="folder" size={12} /><span class="ellipsis grow">{p}</span><Glyph name="open" size={11} /></button>
-          {/each}
-        </div>
-      </div>
+    {#if item.paths.length && item.id !== 'recycle' && canPick(item)}
+      <!-- chọn từng loại / từng thư mục, xem tệp bên trong, nút dọn dính ở đáy ngăn -->
+      <CleanupTree {item} {onopen} />
     {/if}
   </InspectorShell>
 {:else}
@@ -110,8 +111,9 @@
       <section class="insp-card res">
         <div class="res-head"><Glyph name="disk" size={14} /><b>{t('cleanup.ov.biggest')}</b></div>
         {#each biggest as it (it.id)}
+          {@const img = (procs.iconV, it.icon ? procs.icons.get(it.icon) : null)}
           <button type="button" class="res-row link-row" onclick={() => onpick(it)} title={t('cleanup.ov.view')}>
-            <span class="ellipsis">{it.name}</span><span class="mono muted">{fmtBytes(it.bytes)}</span>
+            <span class="ellipsis cl-big">{#if img}<img src={img} width="14" height="14" alt="" />{/if}{it.name}</span><span class="mono muted">{fmtBytes(it.bytes)}</span>
           </button>
         {/each}
       </section>

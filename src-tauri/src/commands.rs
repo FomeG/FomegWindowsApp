@@ -29,11 +29,11 @@ pub async fn cleanup_scan(app: AppHandle, state: St<'_>) -> Result<cleanup::Scan
 /// Dọn các mục (theo mã) của lần quét `id`. UI không bao giờ gửi đường dẫn.
 /// Trong lúc dọn phát `cleanup_progress` ~4 lần/giây (bỏ qua khi cửa sổ ẩn / thu nhỏ; bước cuối luôn gửi).
 #[tauri::command]
-pub async fn cleanup_apply(app: AppHandle, state: St<'_>, id: u64, items: Vec<String>, keep_recent: bool) -> Result<cleanup::ApplyOut, String> {
+pub async fn cleanup_apply(app: AppHandle, state: St<'_>, id: u64, items: Vec<String>, keep_recent: bool, parts: Option<std::collections::HashMap<String, Vec<usize>>>) -> Result<cleanup::ApplyOut, String> {
     let state = state.inner().clone();
     blocking(move || {
         let st = state.clone();
-        let out = state.cleanup.apply(id, &items, keep_recent, move |p| {
+        let out = state.cleanup.apply(id, &items, &parts.unwrap_or_default(), keep_recent, move |p| {
             if p.stage != "delete" || st.visible.load(Ordering::Relaxed) {
                 let _ = app.emit("cleanup_progress", p);
             }

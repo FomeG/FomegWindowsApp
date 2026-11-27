@@ -55,17 +55,20 @@ cleanup.recycle.note:
   vi: 'Các tệp bạn đã xoá vào Thùng rác (mọi ổ). Dọn là mất hẳn, không khôi phục được.'
   en: 'Files you deleted to the Recycle Bin (all drives). Cleaning removes them for good; they cannot be restored.'
 cleanup.cache_note.browser:
-  vi: 'Cache trình duyệt (ảnh, script, video của trang web đã tải). Không mất mật khẩu, lịch sử hay dấu trang. Đóng trình duyệt trước để dọn được nhiều hơn.'
-  en: 'Browser cache (images, scripts, videos of visited pages). Passwords, history and bookmarks are kept. Close the browser first to clean more.'
+  vi: 'Cache trình duyệt (ảnh, script, video của trang web đã tải, bản lưu offline của Service Worker), log và báo cáo lỗi. Không mất mật khẩu, lịch sử hay dấu trang. Đóng trình duyệt trước để dọn được nhiều hơn.'
+  en: 'Browser cache (images, scripts, videos of visited pages, Service Worker offline copies), logs and crash reports. Passwords, history and bookmarks are kept. Close the browser first to clean more.'
 cleanup.cache_note.dot_cache:
   vi: 'Thư mục cache chung của nhiều công cụ; có thể chứa mô hình AI đã tải (Hugging Face, LM Studio…) rất lớn. Xoá thì lần dùng sau phải tải lại.'
   en: 'Shared cache folder of many tools; it may hold very large downloaded AI models (Hugging Face, LM Studio…). If deleted, they must be downloaded again.'
 cleanup.cache_note.dev:
   vi: 'Cache của công cụ lập trình (gói, bản build đã tải). Xoá an toàn nhưng lần build / cài sau phải tải lại, có thể mất thời gian và dung lượng mạng.'
   en: 'Developer tool cache (downloaded packages, builds). Safe to delete, but the next build / install downloads them again, which can take time and bandwidth.'
+cleanup.cache_note.other:
+  vi: 'Cache, log hoặc báo cáo lỗi của một chương trình không nhận ra được (thường là app chạy nền, công cụ đi kèm hoặc app đã gỡ). Chương trình tự tạo lại khi cần; tệp đang dùng được bỏ qua. Xem đường dẫn bên dưới trước khi dọn.'
+  en: 'Cache, logs or crash reports of a program that could not be identified (usually a background app, a bundled tool or an uninstalled app). The program recreates them when needed; files in use are skipped. Check the paths below before cleaning.'
 cleanup.cache_note.app:
-  vi: 'Thư mục cache của ứng dụng (Cache, Code Cache, GPUCache…). Ứng dụng tự tạo lại; lần mở đầu có thể chậm hơn một chút. Tệp đang dùng được bỏ qua.'
-  en: 'App cache folders (Cache, Code Cache, GPUCache…). Apps recreate them; the first launch may be a little slower. Files in use are skipped.'
+  vi: 'Cache (Cache, Code Cache, GPUCache, Service Worker…), log và báo cáo lỗi của ứng dụng. Ứng dụng tự tạo lại; lần mở đầu có thể chậm hơn một chút. Không đụng tới tài khoản, tin nhắn hay cài đặt. Tệp đang dùng được bỏ qua – đóng ứng dụng trước để dọn được nhiều hơn.'
+  en: 'App cache (Cache, Code Cache, GPUCache, Service Worker…), logs and crash reports. Apps recreate them; the first launch may be a little slower. Accounts, messages and settings are not touched. Files in use are skipped – close the app first to clean more.'
 cleanup.err.busy:
   vi: 'Đang có một lượt quét hoặc dọn dẹp khác.'
   en: 'Another scan or cleanup is already running.'

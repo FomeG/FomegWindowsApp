@@ -158,6 +158,8 @@ const clean = {
         label: it?.name ?? x.label,
         reason: x.reason,
         icon: it?.group === 'cache' ? 'folder' : 'delete',
+        // icon thật của ứng dụng (đã tải khi quét)
+        exe: it?.icon || undefined,
         blocked,
         checked: !blocked,
         // dung lượng thật sự dọn được (trừ tệp mới khi "giữ tệp mới", tệp khoá lần trước): cùng số với trang Dọn dẹp
@@ -179,7 +181,8 @@ const clean = {
     return t('ai.review.summary_items', cnt(chosen.length, { size: fmtBytes(size) }));
   },
   async run(chosen, o) {
-    const res = await cleanup.clean(chosen.map((r) => r.key), !!o.keepRecent);
+    // đề xuất của trợ lý = dọn CẢ mục như popup hiện, không theo lựa chọn một phần đang có ở trang
+    const res = await cleanup.clean(chosen.map((r) => r.key), !!o.keepRecent, {});
     return new Map(chosen.map((r) => {
       const x = res.get(r.key);
       return [r.key, x ? { ok: !x.error, error: x.error } : { ok: false, error: t('ai.review.no_result') }];
@@ -253,9 +256,6 @@ const startup = {
   },
 };
 
-// ---------------- dich_vu: đổi kiểu khởi động / dừng / chạy dịch vụ ----------------
-const svcOf = (name) => {
-  const n = name.toLowerCase();
 // ---------------- bien_moi_truong: sửa biến môi trường ----------------
 // Mỗi hàng là một thao tác; khi thực hiện, các thao tác đã tích của CÙNG một biến được gộp và ghi một lần
 // (giá trị đọc lại ngay trước khi ghi, nên sửa tay ở trang trong lúc popup mở vẫn được giữ).
@@ -340,6 +340,9 @@ const envVars = {
   },
 };
 
+// ---------------- dich_vu: đổi kiểu khởi động / dừng / chạy dịch vụ ----------------
+const svcOf = (name) => {
+  const n = name.toLowerCase();
   const list = store.services;
   return list.find((s) => s.key1.toLowerCase() === n) || list.find((s) => s.name.toLowerCase() === n) || null;
 };
