@@ -100,8 +100,8 @@ export const duChildren = (scan, ids, sort = 'size', desc = true, limit = 500) =
 export const duFiles = (path, limit = 2000) => call('du_files', { path, limit });
 export const duCancel = () => call('du_cancel');
 export const duClose = () => call('du_close');
-export const duForget = (scan, id) => call('du_forget', { scan, id });
-export const duForgetFile = (scan, dir, size, alloc) => call('du_forget_file', { scan, dir, size, alloc });
+/** Sau thao tác ngoài app đã đổi đĩa (menu Windows): đưa cây quét về đúng với đĩa cho các đường dẫn này -> { inexact: string[] } */
+export const duSyncPaths = (paths) => call('du_sync_paths', { paths });
 export const duDelete = (paths, permanent) => call('du_delete', { paths, permanent });
 /** Thông tin các đường dẫn trợ lý đề xuất xoá: [{ path, exists, is_dir, size, files, blocked? }] */
 export const duLookup = (paths) => call('du_lookup', { paths });
@@ -114,7 +114,16 @@ export const duPickFolder = () => call('du_pick_folder');
 // Dọn dẹp: quét trả kết quả sau ~2 s; mục đo xong sau đó đến qua sự kiện 'cleanup_item' { scan, item }.
 export const cleanupScan = () => call('cleanup_scan');
 /** Dọn các mục (theo mã) của lần quét `id`. */
-export const cleanupApply = (id, items, keepRecent) => call('cleanup_apply', { id, items, keepRecent });
+/** `parts`: { id: [chỉ số thư mục gốc] } cho mục chỉ dọn một phần (mục khác dọn hết). */
+export const cleanupApply = (id, items, keepRecent, parts = {}) => call('cleanup_apply', { id, items, keepRecent, parts });
+
+// ---------- Biến môi trường (docs/contract-v2.md "Env") ----------
+/** { vars: [Var], can_system, took_ms, history: [Change] } */
+export const envList = () => call('env_list');
+/** Đặt (`value` chuỗi) hoặc xoá (`value` null) biến; trả Change hoặc null nếu không đổi gì. */
+export const envSet = (scope, name, value) => call('env_set', { scope, name, value });
+/** Hoàn tác thay đổi `id` của lịch sử. */
+export const envRestore = (id) => call('env_restore', { id });
 
 // ---------- Ứng dụng đã cài (docs/contract-v2.md "Apps") ----------
 /** { apps: [App], took_ms, store_error } */

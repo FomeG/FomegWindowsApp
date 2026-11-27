@@ -167,6 +167,38 @@ fn matches(f: &str, k: &Keys) -> bool {
     k.keys.iter().any(|key| key_match(f, key))
 }
 
+/// Tên thư mục / tên nhóm -> ứng dụng đã cài (cùng quy tắc nhận diện ở trên). Dùng cho trang Dọn dẹp: tên thật + icon
+/// của nhóm cache. Nhiều app cùng khớp thì chọn app có tên khớp sát nhất (khoá dài nhất), không chắc thì không chọn.
+pub(crate) struct AppMatcher<'a> {
+    apps: &'a [App],
+    keys: Vec<Keys>,
+}
+
+impl<'a> AppMatcher<'a> {
+    pub(crate) fn new(apps: &'a [App]) -> Self {
+        AppMatcher { keys: apps.iter().map(|a| keys(&Ident::of(a))).collect(), apps }
+    }
+    /// `names`: các tên thử theo thứ tự (vd. "Google Chrome", rồi thư mục "Chrome").
+    pub(crate) fn find(&self, names: &[&str]) -> Option<&'a App> {
+        for n in names {
+            let f = norm(n);
+            if f.chars().count() < 4 || STOP.contains(&f.as_str()) || NEVER.contains(&f.as_str()) {
+                continue;
+            }
+            let best = self
+                .keys
+                .iter()
+                .enumerate()
+                .filter_map(|(i, k)| k.keys.iter().filter(|key| key_match(&f, key)).map(|key| key.len()).max().map(|l| (l, i)))
+                .max_by_key(|&(l, i)| (l, std::cmp::Reverse(i)));
+            if let Some((_, i)) = best {
+                return Some(&self.apps[i]);
+            }
+        }
+        None
+    }
+}
+
 // ---------------- nơi tìm ----------------
 
 struct Entry {

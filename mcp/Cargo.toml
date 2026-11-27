@@ -4,7 +4,7 @@
 # Mã dùng chung: fomeg_windows_app_lib::core::{agent_tools, mcp}.
 [package]
 name = "fomeg-windows-app-mcp"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 publish = false
 

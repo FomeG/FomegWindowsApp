@@ -29,15 +29,17 @@ pub async fn cleanup_scan(app: AppHandle, state: St<'_>) -> Result<cleanup::Scan
 /// Dọn các mục (theo mã) của lần quét `id`. UI không bao giờ gửi đường dẫn.
 /// Trong lúc dọn phát `cleanup_progress` ~4 lần/giây (bỏ qua khi cửa sổ ẩn / thu nhỏ; bước cuối luôn gửi).
 #[tauri::command]
-pub async fn cleanup_apply(app: AppHandle, state: St<'_>, id: u64, items: Vec<String>, keep_recent: bool) -> Result<cleanup::ApplyOut, String> {
+pub async fn cleanup_apply(app: AppHandle, state: St<'_>, id: u64, items: Vec<String>, keep_recent: bool, parts: Option<std::collections::HashMap<String, Vec<usize>>>) -> Result<cleanup::ApplyOut, String> {
     let state = state.inner().clone();
     blocking(move || {
         let st = state.clone();
-        state.cleanup.apply(id, &items, keep_recent, move |p| {
+        let out = state.cleanup.apply(id, &items, &parts.unwrap_or_default(), keep_recent, move |p| {
             if p.stage != "delete" || st.visible.load(Ordering::Relaxed) {
                 let _ = app.emit("cleanup_progress", p);
             }
-        })
+        })?;
+        du_sync_cleaned(&state, &out);
+        Ok(out)
     })
     .await?
 }
@@ -854,24 +856,100 @@ pub fn du_close(state: St<'_>) {
     }
 }
 
-#[tauri::command(rename_all = "snake_case")]
-pub fn du_forget(state: St<'_>, scan: u64, id: u32) -> Result<(), String> {
-    du_current(&state, scan)?.forget(id);
-    Ok(())
+#[derive(Serialize)]
+pub struct DuDeleteOut {
+    /// không bị huỷ giữa chừng
+    done: bool,
+    /// lỗi của Windows (xoá không hoàn tất); số liệu vẫn đã được cập nhật theo những gì thật sự đã mất
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    /// đường dẫn mà số liệu trong cây có thể chưa chính xác (nhánh quá lớn để đo lại kịp / lần quét còn đang chạy ở đó)
+    inexact: Vec<String>,
 }
 
+/// Xoá các mục người dùng chọn trên trang Ổ cứng (Thùng rác hoặc vĩnh viễn, hộp tiến trình của Windows). Sau đó
+/// cây quét hiện tại được cập nhật NGAY ở backend (xem `du_sync_deleted`), kể cả khi Windows báo lỗi (có thể đã xoá
+/// được một phần): giao diện chỉ cần làm mới, không quét lại.
 #[tauri::command(rename_all = "snake_case")]
-pub fn du_forget_file(state: St<'_>, scan: u64, dir: u32, size: u64, alloc: u64) -> Result<(), String> {
-    du_current(&state, scan)?.forget_file(dir, size, alloc);
-    Ok(())
-}
-
-#[tauri::command(rename_all = "snake_case")]
-pub async fn du_delete(paths: Vec<String>, permanent: bool) -> Result<bool, String> {
+pub async fn du_delete(state: St<'_>, paths: Vec<String>, permanent: bool) -> Result<DuDeleteOut, String> {
     if let Some(p) = paths.iter().find(|p| du::protected(p)) {
         return Err(tr!("du.err.protected_path", p = p));
     }
-    blocking(move || shell::delete(&paths, permanent)).await?
+    let scan = state.du.lock().ok().and_then(|g| g.clone());
+    blocking(move || {
+        // kích thước thật TRƯỚC khi xoá (sau đó không còn đọc được)
+        let before: Vec<(String, Option<du::EntryInfo>)> = paths.iter().filter_map(|p| du::normalize_abs(p)).map(|p| { let i = du::entry_info(&p); (p, i) }).collect();
+        let res = shell::delete(&paths, permanent);
+        let inexact = du_sync_deleted(scan.as_deref(), &before);
+        match res {
+            Ok(done) => DuDeleteOut { done, error: None, inexact },
+            Err(e) => DuDeleteOut { done: false, error: Some(e), inexact },
+        }
+    })
+    .await
+}
+
+/// Sau một lần xoá (kể cả thất bại một phần): đưa cây quét về đúng với đĩa mà chỉ đụng nhánh bị ảnh hưởng, và bỏ các
+/// bộ nhớ đệm khác liên quan (kích thước ứng dụng, thư mục còn sót). Trả các đường dẫn có số liệu có thể chưa chính xác
+/// (`Stale`: quá lớn so với thời gian đo lại / không đọc được; `Busy`: lần quét còn đang chạy ở nhánh đó).
+fn du_sync_deleted(scan: Option<&du::Scan>, items: &[(String, Option<du::EntryInfo>)]) -> Vec<String> {
+    let all: Vec<String> = items.iter().map(|i| i.0.clone()).collect();
+    apps::forget_sizes(&all);
+    crate::core::leftovers::invalidate();
+    let mut inexact = Vec::new();
+    let Some(scan) = scan else { return inexact };
+    // mục con (đường dẫn dài hơn) trước, rồi mới tới cha: cha được tính TUYỆT ĐỐI (gỡ cả nhánh / đo lại) nên không trừ hai lần
+    // phần của con; ngược lại con xử lý sau cha sẽ trừ lần hai.
+    let mut order: Vec<&(String, Option<du::EntryInfo>)> = items.iter().collect();
+    order.sort_by_key(|i| std::cmp::Reverse(i.0.len()));
+    for (path, info) in order {
+        // không có thông tin lấy trước (lệnh của menu Windows…): loại mục lấy từ đĩa / cây
+        let r = match info {
+            Some(info) => scan.after_delete(path, info),
+            None => scan.sync_path(path, du::SYNC_BUDGET),
+        };
+        if matches!(r, Some(du::SyncResult::Stale | du::SyncResult::Busy)) {
+            inexact.push(path.clone());
+        }
+    }
+    inexact
+}
+
+#[derive(Serialize)]
+pub struct DuSyncOut {
+    /// đường dẫn mà số liệu trong cây có thể chưa chính xác (xem `DuDeleteOut::inexact`)
+    inexact: Vec<String>,
+}
+
+/// Sau khi một thao tác NGOÀI app đã đổi đĩa (lệnh xoá / cắt / dán… của menu chuột phải Windows): đưa cây quét hiện tại về
+/// đúng với đĩa cho các đường dẫn này, cùng logic với `du_delete` (mục đã mất: gỡ / đọc lại tệp của thư mục cha; thư mục còn
+/// lại một phần: đo lại riêng nhánh đó). Không quét lại ổ.
+#[tauri::command(rename_all = "snake_case")]
+pub async fn du_sync_paths(state: St<'_>, paths: Vec<String>) -> Result<DuSyncOut, String> {
+    let scan = state.du.lock().ok().and_then(|g| g.clone());
+    blocking(move || {
+        let items: Vec<(String, Option<du::EntryInfo>)> = paths.iter().take(20).filter_map(|p| du::normalize_abs(p)).map(|p| (p, None)).collect();
+        DuSyncOut { inexact: du_sync_deleted(scan.as_deref(), &items) }
+    })
+    .await
+}
+
+/// Sau khi Dọn dẹp xong: nếu đang có một lần quét ổ cứng, đo lại các thư mục gốc của mục vừa dọn nằm trong lần quét đó
+/// (chỉ các nhánh này, mỗi nhánh tối đa `SYNC_BUDGET`, tổng ≤ 20 s; quá 10 thư mục thì bỏ qua) để cây Ổ cứng không giữ số cũ.
+fn du_sync_cleaned(state: &AppState, out: &cleanup::ApplyOut) {
+    let Some(scan) = state.du.lock().ok().and_then(|g| g.clone()) else { return };
+    let roots: Vec<&String> = out.items.iter().filter(|i| i.id != "recycle").flat_map(|i| i.paths.iter()).filter(|p| scan.find(p).is_some()).collect();
+    if roots.is_empty() || roots.len() > 10 {
+        return;
+    }
+    let t0 = std::time::Instant::now();
+    for p in roots {
+        let left = std::time::Duration::from_secs(20).saturating_sub(t0.elapsed());
+        if left.is_zero() {
+            break;
+        }
+        scan.sync_path(p, left.min(du::SYNC_BUDGET));
+    }
 }
 
 #[derive(Serialize)]
@@ -930,6 +1008,9 @@ pub struct DuDeleted {
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    /// số liệu của mục này trong cây quét có thể chưa chính xác (xem `DuDeleteOut::inexact`)
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    inexact: bool,
 }
 
 /// Xoá nhiều mục người dùng đã chọn (vào Thùng rác hoặc vĩnh viễn), trả kết quả từng mục và bỏ các mục
@@ -939,51 +1020,46 @@ pub async fn du_delete_paths(state: St<'_>, paths: Vec<String>, permanent: bool)
     let scan = state.du.lock().ok().and_then(|g| g.clone());
     blocking(move || {
         let mut out = Vec::with_capacity(paths.len());
-        // (đường dẫn, thư mục?, kích thước tệp) của các mục được phép xoá
-        let mut todo: Vec<(String, bool, u64)> = Vec::new();
+        // (đường dẫn, kích thước thật lấy TRƯỚC khi xoá) của các mục được phép xoá
+        let mut todo: Vec<(String, Option<du::EntryInfo>)> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         for raw in paths.into_iter().take(200) {
             let Some(path) = du::normalize_abs(&raw) else {
-                out.push(DuDeleted { path: raw, ok: false, error: Some(tr!("du.err.not_absolute")) });
+                out.push(DuDeleted { path: raw, ok: false, error: Some(tr!("du.err.not_absolute")), inexact: false });
                 continue;
             };
             if let Some(e) = block_reason(&path) {
-                out.push(DuDeleted { path, ok: false, error: Some(e) });
+                out.push(DuDeleted { path, ok: false, error: Some(e), inexact: false });
                 continue;
             }
-            match std::fs::symlink_metadata(&path) {
-                Ok(m) => todo.push((path, m.is_dir(), m.len())),
-                Err(_) => out.push(DuDeleted { path, ok: false, error: Some(tr!("du.err.gone")) }),
+            if !seen.insert(path.to_lowercase()) {
+                continue; // trùng: chỉ xoá / trừ một lần
+            }
+            match du::entry_info(&path) {
+                Some(i) => todo.push((path, Some(i))),
+                None => out.push(DuDeleted { path, ok: false, error: Some(tr!("du.err.gone")), inexact: false }),
             }
         }
-        // thư mục chứa tệp ("C:\a.txt" -> "C:\"), để trừ tệp khỏi số liệu của cây
-        let parent_of = |p: &str| p.rfind('\\').map(|i| if i == 2 { p[..3].to_owned() } else { p[..i].to_owned() });
         let all: Vec<String> = todo.iter().map(|t| t.0.clone()).collect();
         let batch = shell::delete(&all, permanent);
-        apps::forget_sizes(&all);
-        crate::core::leftovers::invalidate();
-        for (path, is_dir, len) in todo {
+        for (path, _) in &todo {
             let mut error = None;
-            if shell::exists(&path) && batch.is_err() {
-                // thử lại riêng mục này để lấy lỗi cụ thể
-                if let Err(e) = shell::delete(std::slice::from_ref(&path), permanent) {
+            if shell::exists(path) && batch.is_err() {
+                // thử lại riêng mục này để lấy lỗi cụ thể (có thể xoá thêm được một phần)
+                if let Err(e) = shell::delete(std::slice::from_ref(path), permanent) {
                     error = Some(e);
                 }
             }
-            let ok = !shell::exists(&path);
-            if ok {
-                if let Some(s) = &scan {
-                    if is_dir {
-                        if let Some(id) = s.find(&path) {
-                            s.forget(id);
-                        }
-                    } else if let Some(dir) = parent_of(&path).and_then(|d| s.find(&d)) {
-                        s.forget_file(dir, len, len);
-                    }
-                }
-            } else if error.is_none() {
+            let ok = !shell::exists(path);
+            if !ok && error.is_none() {
                 error = Some(batch.as_ref().err().cloned().unwrap_or_else(|| tr!("du.err.not_deleted")));
             }
-            out.push(DuDeleted { path, ok, error });
+            out.push(DuDeleted { path: path.clone(), ok, error, inexact: false });
+        }
+        // cây quét: chỉ nhánh bị ảnh hưởng (mất hẳn -> trừ đúng số liệu; còn một phần -> đo lại riêng nhánh đó)
+        let inexact = du_sync_deleted(scan.as_deref(), &todo);
+        for d in out.iter_mut().filter(|d| inexact.iter().any(|p| p.eq_ignore_ascii_case(&d.path))) {
+            d.inexact = true;
         }
         out
     })
@@ -1040,6 +1116,26 @@ pub async fn du_menu(window: tauri::WebviewWindow, path: String, is_dir: bool, s
 #[tauri::command(rename_all = "snake_case")]
 pub async fn du_pick_folder(window: tauri::WebviewWindow) -> Result<Option<String>, String> {
     on_ui(window, shell::pick_folder).await
+}
+
+// ---------------- Biến môi trường ----------------
+
+/// Biến người dùng + hệ thống đã phân tích (mục Path còn tồn tại / trùng…) + lịch sử thay đổi. ~1–5 ms.
+#[tauri::command]
+pub async fn env_list() -> Result<crate::core::env_vars::ListOut, String> {
+    blocking(crate::core::env_vars::list).await
+}
+
+/// Đặt (`value`) hoặc xoá (`value: null`) biến `name` của `scope` (user|system). None = giá trị không đổi.
+#[tauri::command]
+pub async fn env_set(scope: String, name: String, value: Option<String>) -> Result<Option<crate::core::env_vars::Change>, String> {
+    blocking(move || crate::core::env_vars::set(&scope, &name, value)).await?
+}
+
+/// Hoàn tác thay đổi `id` của lịch sử.
+#[tauri::command]
+pub async fn env_restore(id: u64) -> Result<Option<crate::core::env_vars::Change>, String> {
+    blocking(move || crate::core::env_vars::restore(id)).await?
 }
 
 // ---------------- Cổng (ports) ----------------

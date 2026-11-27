@@ -23,7 +23,7 @@ use std::ffi::{c_void, OsString};
 use crate::tr;
 use std::os::windows::ffi::OsStringExt;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -267,7 +267,22 @@ const CACHE_NAMES: &[&str] = &[
     "go-build",
     "v3-cache",
     ".cache",
+    // Service Worker của Chromium / Electron (Discord, Teams, trình duyệt…): bản lưu offline của trang web, tự tải lại
+    "cachestorage",
+    "scriptcache",
 ];
+
+/// Thư mục log của ứng dụng: chỉ nhận khi MỌI tệp ở cấp đầu đúng là tệp log (`is_log_file`), để không bao giờ dọn nhầm
+/// một thư mục dữ liệu tình cờ tên "log".
+const LOG_NAMES: &[&str] = &["logs", "log"];
+/// Báo cáo lỗi / bản ghi khi ứng dụng bị treo (Crashpad của Chromium / Electron, Crash Reports của Firefox…).
+const CRASH_NAMES: &[&str] = &["crashpad", "crash reports", "crashreports", "crashes", "crashdumps", "crash dumps"];
+
+/// Tệp log: tên có ".log" (vd. main.log.1) hoặc đuôi nhật ký / bản nén nhật ký thường gặp.
+fn is_log_file(name: &str) -> bool {
+    let n = name.to_lowercase();
+    n.contains(".log") || [".txt", ".etl", ".gz", ".zip", ".old", ".bak", ".jsonl", ".dmp", ".trace"].iter().any(|e| n.ends_with(e))
+}
 
 /// Không đi vào: thư viện dự án, kho git, dữ liệu ứng dụng Store (LocalCache có thể chứa dữ liệu thật, vd. Python Store).
 /// Extension / môi trường Python: thư mục tên "cache" trong đó có thể là một phần của extension / thư viện.
@@ -290,6 +305,20 @@ const KNOWN: &[(&[&str], &str, &str)] = &[
     (&["code"], "VS Code", "app"),
     (&["cursor"], "Cursor", "app"),
     (&["microsoft", "teams"], "Microsoft Teams", "app"),
+    (&["microsoft", "onedrive"], "OneDrive", "app"),
+    (&["discord"], "Discord", "app"),
+    (&["slack"], "Slack", "app"),
+    (&["spotify"], "Spotify", "app"),
+    (&["telegram desktop"], "Telegram", "app"),
+    (&["zalo"], "Zalo", "app"),
+    (&["zalopc"], "Zalo", "app"),
+    (&["steam"], "Steam", "app"),
+    (&["obs-studio"], "OBS Studio", "app"),
+    (&["notion"], "Notion", "app"),
+    (&["figma"], "Figma", "app"),
+    (&["postman"], "Postman", "app"),
+    (&["claude"], "Claude", "app"),
+    (&["anthropicclaude"], "Claude", "app"),
     (&["jetbrains"], "JetBrains", "dev"),
     (&["pip"], "pip", "dev"),
     (&["uv"], "uv", "dev"),
@@ -302,6 +331,18 @@ const KNOWN: &[(&[&str], &str, &str)] = &[
     (&[".cargo"], "Cargo", "dev"),
     (&[".android"], "Android SDK", "dev"),
     (&[".cache"], "~/.cache", "dev"),
+    (&["node-gyp"], "node-gyp", "dev"),
+    (&["ms-playwright"], "Playwright", "dev"),
+    (&["electron"], "Electron", "dev"),
+    (&["electron-builder"], "electron-builder", "dev"),
+    (&["numba"], "Numba", "dev"),
+    (&["pub"], "Dart pub", "dev"),
+    (&["pnpm"], "pnpm", "dev"),
+    (&["pnpm-cache"], "pnpm", "dev"),
+    (&["deno"], "Deno", "dev"),
+    (&["composer"], "Composer", "dev"),
+    (&["pypoetry"], "Poetry", "dev"),
+    (&["huggingface"], "Hugging Face", "dev"),
 ];
 
 /// Đoạn đường dẫn không mang tên ứng dụng (bỏ qua khi đặt tên nhóm).
@@ -328,6 +369,30 @@ pub struct ItemOut {
     /// đang đo (kích thước gửi sau qua sự kiện `cleanup_item`)
     pub pending: bool,
     pub error: Option<String>,
+    /// nhóm cache của ứng dụng: gồm những gì (cache | log | crash), theo thứ tự đó
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub kinds: Vec<&'static str>,
+    /// tệp lấy icon của ứng dụng đã cài (exe / ico), "" = không có -> giao diện dùng icon thư mục
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub icon: String,
+    /// từng thư mục gốc, CÙNG THỨ TỰ với `paths`: loại + số liệu riêng (dọn từng phần: `cleanup_apply` nhận chỉ số)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<PartOut>,
+}
+
+#[derive(Clone, Copy, Default, Serialize)]
+pub struct PartOut {
+    /// cache | log | crash ("" với mục cố định)
+    pub kind: &'static str,
+    pub bytes: u64,
+    pub files: u64,
+    pub recent_bytes: u64,
+    pub recent_files: u64,
+}
+
+/// Nhóm của thư mục tìm được: ứng dụng nhận ra được | công cụ lập trình / thư mục ẩn | thư mục không rõ của app nào.
+pub(crate) fn is_found_group(g: &str) -> bool {
+    matches!(g, "cache" | "dev" | "other")
 }
 
 #[derive(Serialize)]
@@ -336,14 +401,19 @@ pub struct ScanOut {
     pub items: Vec<ItemOut>,
     pub took_ms: f64,
     pub admin: bool,
+    pub system_drive: Option<String>,
 }
 
 #[derive(Default, Serialize)]
 pub struct ItemResult {
     pub id: String,
     pub removed: u64,
-    /// tệp/thư mục bỏ qua: đang được dùng, không có quyền, liên kết, hoặc mới (khi giữ tệp mới)
+    /// tệp/thư mục bỏ qua: đang được dùng, không có quyền hoặc là liên kết
     pub skipped: u64,
+    /// dung lượng các tệp mở/xoá thất bại; không tính thư mục và liên kết
+    pub skipped_bytes: u64,
+    /// phần của skipped_bytes sửa trong 24 giờ qua, cùng mốc với lần đo lại
+    pub skipped_recent_bytes: u64,
     pub kept_recent: u64,
     pub bytes: u64,
     pub error: Option<String>,
@@ -394,11 +464,13 @@ impl Cleaner {
         self.stop_measure();
         let t0 = Instant::now();
         let admin = crate::is_elevated();
-        let mut items = discover(&Folders::get(), admin);
+        let folders = Folders::get();
+        let system_drive = folders.windows.as_deref().and_then(|path| path.get(..2)).filter(|prefix| prefix.ends_with(':')).map(str::to_ascii_uppercase);
+        let mut items = discover(&folders, admin);
         for it in items.iter_mut() {
             it.pending = true;
         }
-        let (m, rx) = Measure::start(&items);
+        let (m, rx) = Measure::start(&items, now_ms() - RECENT_MS);
         let deadline = Instant::now() + Duration::from_millis(MEASURE_WAIT_MS);
         let mut left = items.len();
         while left > 0 {
@@ -428,6 +500,9 @@ impl Cleaner {
                     let Ok(mut g) = plan.lock() else { break };
                     let Some(p) = g.as_mut().filter(|p| p.id == id) else { break };
                     let it = &mut p.items[i as usize];
+                    if !it.pending {
+                        continue; // mục đã được đo lại sau khi dọn
+                    }
                     m.fill(i as usize, it);
                     let out = it.clone();
                     drop(g);
@@ -435,7 +510,7 @@ impl Cleaner {
                 }
             });
         }
-        Ok(ScanOut { id, items, took_ms: t0.elapsed().as_secs_f64() * 1000.0, admin })
+        Ok(ScanOut { id, items, took_ms: t0.elapsed().as_secs_f64() * 1000.0, admin, system_drive })
     }
 
     fn stop_measure(&self) {
@@ -445,9 +520,11 @@ impl Cleaner {
     }
 
     /// Dọn các mục `ids` của lần quét `id`, rồi đo lại CHỈ các mục đó (không quét lại cả máy).
+    /// `parts`: mục chỉ dọn một phần -> chỉ số các thư mục gốc (trong `paths` của lần quét) được chọn; mục không có ở đây
+    /// thì dọn hết. Chỉ số ngoài phạm vi bị bỏ qua: backend không bao giờ nhận đường dẫn từ giao diện.
     /// `progress` được gọi ~4 lần/giây trong lúc dọn (từ một luồng riêng, chỉ đọc vài bộ đếm nguyên tử) và một lần khi
     /// chuyển sang đo lại.
-    pub fn apply(&self, id: u64, ids: &[String], keep_recent: bool, progress: impl Fn(&CleanProgress) + Sync) -> Result<ApplyOut, String> {
+    pub fn apply(&self, id: u64, ids: &[String], parts: &HashMap<String, Vec<usize>>, keep_recent: bool, progress: impl Fn(&CleanProgress) + Sync) -> Result<ApplyOut, String> {
         let _busy = self.enter()?;
         let t0 = Instant::now();
         let mut targets: Vec<ItemOut> = {
@@ -461,20 +538,41 @@ impl Cleaner {
         if targets.is_empty() {
             return Err(tr!("cleanup.err.none_selected"));
         }
-        self.stop_measure(); // đừng tranh ổ đĩa với việc xoá
+        // Tạm dừng lượt đo nền. Các mục khác tiếp tục đo từ chỗ cũ sau khi dọn.
+        let measure = self.measure.lock().ok().and_then(|g| g.clone());
+        let _paused = measure.as_ref().and_then(|m| m.io.write().ok());
         enable_privileges();
-        let cutoff = if keep_recent { now_ms() - RECENT_MS } else { i64::MAX };
+        let recent_after = now_ms() - RECENT_MS;
+        // thư mục gốc được chọn của từng mục (mục chọn một phần: chỉ các chỉ số hợp lệ)
+        let chosen: Vec<Vec<usize>> = targets
+            .iter()
+            .map(|t| match parts.get(&t.id) {
+                Some(sel) => {
+                    let mut v: Vec<usize> = sel.iter().copied().filter(|&k| k < t.paths.len()).collect();
+                    v.sort_unstable();
+                    v.dedup();
+                    v
+                }
+                None => (0..t.paths.len()).collect(),
+            })
+            .collect();
+        if targets.iter().zip(&chosen).all(|(t, c)| t.id != RECYCLE_ID && c.is_empty()) {
+            return Err(tr!("cleanup.err.none_selected"));
+        }
         let roots: Vec<(usize, String)> = targets
             .iter()
             .enumerate()
             .filter(|(_, t)| t.id != RECYCLE_ID)
-            .flat_map(|(i, t)| t.paths.iter().map(move |p| (i, p.clone())))
+            .flat_map(|(i, t)| chosen[i].iter().map(move |&k| (i, t.paths[k].clone())))
             .collect();
         let has_recycle = targets.iter().any(|t| t.id == RECYCLE_ID);
-        // tổng từ lần quét (Thùng rác không đếm được từng tệp -> không tính vào tổng)
-        let files: Vec<u64> = targets.iter().map(|t| if t.id == RECYCLE_ID { 0 } else { t.files }).collect();
+        // tổng từ lần quét (Thùng rác không đếm được từng tệp -> không tính vào tổng); mục một phần: chỉ phần đã chọn
+        let part_sum = |t: &ItemOut, c: &[usize], f: fn(&PartOut) -> u64, whole: u64| {
+            if c.len() == t.paths.len() || t.parts.len() != t.paths.len() { whole } else { c.iter().map(|&k| f(&t.parts[k])).sum() }
+        };
+        let files: Vec<u64> = targets.iter().zip(&chosen).map(|(t, c)| if t.id == RECYCLE_ID { 0 } else { part_sum(t, c, |p| p.files, t.files) }).collect();
         let total_files = files.iter().sum();
-        let total_bytes = targets.iter().filter(|t| t.id != RECYCLE_ID).map(|t| t.bytes).sum();
+        let total_bytes = targets.iter().zip(&chosen).filter(|(t, _)| t.id != RECYCLE_ID).map(|(t, c)| part_sum(t, c, |p| p.bytes, t.bytes)).sum();
         let tally = Tally { files: AtomicU64::new(0), bytes: AtomicU64::new(0), item: AtomicUsize::new(usize::MAX) };
         let done = AtomicBool::new(false);
         let snapshot = |stage: &'static str| {
@@ -502,7 +600,7 @@ impl Cleaner {
                     }
                 }
             });
-            let (c, e) = Deleter::run(targets.len(), &roots, cutoff, &tally);
+            let (c, e) = Deleter::run(targets.len(), &roots, recent_after, keep_recent, &tally);
             let r = rh.and_then(|h| h.join().ok());
             done.store(true, Ordering::Release);
             reporter.thread().unpark(); // đừng đợi hết chu kỳ
@@ -518,12 +616,21 @@ impl Cleaner {
                     return recycle.take().unwrap_or_default();
                 }
                 let c = counts[i];
-                ItemResult { id: t.id.clone(), removed: c.removed, skipped: c.skipped, kept_recent: c.kept_recent, bytes: c.bytes, error: errors[i].clone() }
+                ItemResult {
+                    id: t.id.clone(),
+                    removed: c.removed,
+                    skipped: c.skipped,
+                    skipped_bytes: c.skipped_bytes,
+                    skipped_recent_bytes: c.skipped_recent_bytes,
+                    kept_recent: c.kept_recent,
+                    bytes: c.bytes,
+                    error: errors[i].clone(),
+                }
             })
             .collect();
 
         // đo lại các mục vừa dọn (phần còn lại thường rất nhỏ) và cập nhật kết quả quét đang giữ
-        let (m, rx) = Measure::start(&targets);
+        let (m, rx) = Measure::start(&targets, recent_after);
         for _ in 0..targets.len() {
             let Ok(i) = rx.recv() else { break };
             m.fill(i as usize, &mut targets[i as usize]);
@@ -535,8 +642,11 @@ impl Cleaner {
         }
         if let Ok(mut g) = self.plan.lock() {
             if let Some(p) = g.as_mut().filter(|p| p.id == id) {
-                for t in &targets {
-                    if let Some(x) = p.items.iter_mut().find(|x| x.id == t.id) {
+                for (i, x) in p.items.iter_mut().enumerate() {
+                    if let Some(t) = targets.iter().find(|t| t.id == x.id) {
+                        if let Some(m) = &measure {
+                            m.discard(i as u32);
+                        }
                         *x = t.clone();
                     }
                 }
@@ -691,21 +801,27 @@ fn discover(f: &Folders, admin: bool) -> Vec<ItemOut> {
     }
 
     let queue = Mutex::new(tasks);
-    let hits = Mutex::new(Vec::<(Vec<String>, String)>::new());
-    std::thread::scope(|s| {
+    let hits = Mutex::new(Vec::<Hit>::new());
+    // ứng dụng đã cài (tên thật + icon của nhóm cache): đọc song song với lúc tìm; apps::list dùng bản nhớ khi
+    // chưa cài / gỡ gì (~0,5 ms), lần đầu ~0,4 s – vẫn xong trước bước tìm cache
+    let installed = std::thread::scope(|s| {
+        let apps = s.spawn(|| super::apps::list().apps);
         for _ in 0..MEASURE_WORKERS {
             s.spawn(|| {
                 let mut buf = vec![0u64; du::BUF_U64];
+                let mut lbuf = vec![0u64; 1024];
                 // and_then nhận guard theo giá trị -> khoá được trả ngay, các luồng không chờ nhau
                 while let Some((path, comps)) = queue.lock().ok().and_then(|mut q| q.pop()) {
-                    let found = find_caches(&path, comps, &skip, until, &mut buf);
+                    let found = find_caches(&path, comps, &skip, until, &mut buf, &mut lbuf);
                     if let Ok(mut h) = hits.lock() {
                         h.extend(found);
                     }
                 }
             });
         }
+        apps.join().unwrap_or_default()
     });
+    let matcher = super::leftovers::AppMatcher::new(&installed);
 
     let mut items: Vec<ItemOut> = FIXED
         .iter()
@@ -723,21 +839,121 @@ fn discover(f: &Folders, admin: bool) -> Vec<ItemOut> {
     items.push(recycle);
 
     let mut groups: HashMap<String, ItemOut> = HashMap::new();
-    for (comps, path) in hits.into_inner().unwrap_or_default() {
+    // nhãn -> ứng dụng đã cài (tên, icon, thư mục cài); mỗi nhãn chỉ so một lần
+    let mut seen: HashMap<String, Option<(String, String, String)>> = HashMap::new();
+    // nhóm -> nơi tìm exe để lấy icon khi app không khai icon (thư mục gốc của app + thư mục cài)
+    let mut look: HashMap<String, (Vec<String>, Vec<String>)> = HashMap::new();
+    for (comps, path, what) in hits.into_inner().unwrap_or_default() {
         let (label, kind) = app_label(&comps);
-        let id = format!("cache:{}", label.to_lowercase());
-        groups
-            .entry(id.clone())
-            .or_insert_with(|| {
-                let (note, safety) = cache_note(kind, &label);
-                row(id, "cache", label, tr!(note), Vec::new(), safety, false, None)
-            })
-            .paths
-            .push(path);
+        // thư mục dữ liệu đặt theo tên exe ("Voicemod.exe", "ollama app.exe"): bỏ đuôi
+        let label = match label.len().checked_sub(4) {
+            Some(i) if label.is_char_boundary(i) && label[i..].eq_ignore_ascii_case(".exe") && i > 0 => label[..i].to_owned(),
+            _ => label,
+        };
+        let lower: Vec<String> = comps.iter().map(|s| s.to_lowercase()).collect();
+        // công cụ lập trình (npm, pip, ~/.cache…) giữ tên riêng; ứng dụng thì lấy tên + icon của app đã cài
+        let app = if kind == "dev" {
+            None
+        } else {
+            seen.entry(label.to_lowercase())
+                .or_insert_with(|| {
+                    let a = if lower[0] == "packages" && comps.len() > 1 {
+                        store_app(&installed, &comps[1])
+                    } else {
+                        let vendor_app = (VENDORS.contains(&lower[0].as_str()) && comps.len() > 2).then(|| comps[1].as_str());
+                        let mut names = vec![label.as_str()];
+                        names.extend(vendor_app);
+                        names.push(&comps[0]);
+                        matcher.find(&names)
+                    };
+                    a.map(|a| (a.name.clone(), a.icon.clone(), a.location.clone()))
+                })
+                .clone()
+        };
+        // nhãn đã biết (KNOWN) giữ nguyên ("Google Chrome"); nhãn lấy từ tên thư mục ("discord") thì dùng tên của app
+        let known = KNOWN.iter().any(|&(_, l, _)| l == label);
+        let name = match &app {
+            Some((n, _, _)) if !known => clean_app_name(n),
+            _ => label.clone(),
+        };
+        let id = format!("cache:{}", name.to_lowercase());
+        // nhóm: ứng dụng = nhận ra được (app đã cài, trình duyệt / app quen thuộc); công cụ lập trình / thư mục ẩn (.bun,
+        // .claude…); còn lại = thư mục không rõ của app nào (để tab Ứng dụng chỉ có ứng dụng thật)
+        let group = if kind == "dev" { "dev" } else if app.is_some() || known { "cache" } else { "other" };
+        let g = groups.entry(id.clone()).or_insert_with(|| {
+            let (note, safety) = if group == "other" { ("cleanup.cache_note.other", "safe") } else { cache_note(kind, &name) };
+            row(id.clone(), group, name.clone(), tr!(note), Vec::new(), safety, false, None)
+        });
+        if group == "cache" && g.group == "other" {
+            g.group = "cache";
+            g.note = tr!(cache_note(kind, &name).0);
+        }
+        if g.icon.is_empty() {
+            if let Some((_, icon, _)) = &app {
+                g.icon.clone_from(icon);
+            }
+        }
+        if !g.kinds.contains(&what) {
+            g.kinds.push(what);
+        }
+        if kind != "dev" && g.icon.is_empty() {
+            let (rel, roots) = look.entry(id).or_default();
+            if let Some((r, root)) = app_root(&path, &comps, &lower) {
+                if !rel.contains(&r) {
+                    rel.push(r);
+                }
+                if !roots.contains(&root) {
+                    roots.push(root);
+                }
+            }
+            if let Some((_, _, loc)) = &app {
+                if !loc.is_empty() && !roots.contains(loc) {
+                    roots.push(loc.clone());
+                }
+            }
+        }
+        g.paths.push(path);
+        g.parts.push(PartOut { kind: what, ..Default::default() });
+    }
+    // app không khai icon (Discord, Figma, OneDrive…): tìm exe của nó cạnh thư mục dữ liệu, song song, chỉ 1–2 cấp
+    let need: Vec<(String, Vec<String>, Vec<String>)> = look
+        .into_iter()
+        .filter(|(id, _)| groups.get(id).is_some_and(|g| g.icon.is_empty()))
+        .map(|(id, (rel, roots))| {
+            let keys: Vec<String> = rel.iter().chain(groups.get(&id).map(|g| &g.name)).filter_map(|r| r.rsplit('\\').next()).map(super::leftovers::norm).filter(|k| k.len() >= 3).collect();
+            (id, exe_dirs(f, &rel, roots), keys)
+        })
+        .collect();
+    let next = AtomicUsize::new(0);
+    let found = Mutex::new(Vec::new());
+    std::thread::scope(|s| {
+        for _ in 0..MEASURE_WORKERS.min(need.len()) {
+            s.spawn(|| {
+                let mut buf = vec![0u64; 2048];
+                while let Some((id, dirs, keys)) = need.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    if let Some(exe) = find_exe(dirs, keys, &mut buf) {
+                        if let Ok(mut v) = found.lock() {
+                            v.push((id.clone(), exe));
+                        }
+                    }
+                }
+            });
+        }
+    });
+    for (id, exe) in found.into_inner().unwrap_or_default() {
+        if let Some(g) = groups.get_mut(&id) {
+            g.icon = exe;
+        }
     }
     let mut caches: Vec<ItemOut> = groups.into_values().collect();
+    const ORDER: [&str; 3] = ["cache", "log", "crash"];
+    let rank = |k: &str| ORDER.iter().position(|x| *x == k);
     for c in &mut caches {
-        c.paths.sort_unstable();
+        // đường dẫn + phần cùng thứ tự: theo loại (cache, log, báo cáo lỗi) rồi theo đường dẫn
+        let mut both: Vec<(String, PartOut)> = std::mem::take(&mut c.paths).into_iter().zip(std::mem::take(&mut c.parts)).collect();
+        both.sort_by(|a, b| rank(a.1.kind).cmp(&rank(b.1.kind)).then_with(|| a.0.cmp(&b.0)));
+        (c.paths, c.parts) = both.into_iter().unzip();
+        c.kinds.sort_by_key(|k| rank(k));
     }
     caches.sort_by_cached_key(|c| c.name.to_lowercase());
     items.extend(caches);
@@ -746,14 +962,45 @@ fn discover(f: &Folders, admin: bool) -> Vec<ItemOut> {
 
 #[allow(clippy::too_many_arguments)]
 fn row(id: String, group: &'static str, name: String, note: String, paths: Vec<String>, safety: &'static str, on: bool, error: Option<String>) -> ItemOut {
-    ItemOut { id, group, name, note, paths, bytes: 0, files: 0, recent_bytes: 0, recent_files: 0, newest: 0, safety, default_on: on, pending: false, error }
+    ItemOut { id, group, name, note, paths, bytes: 0, files: 0, recent_bytes: 0, recent_files: 0, newest: 0, safety, default_on: on, pending: false, error, kinds: Vec::new(), icon: String::new(), parts: Vec::new() }
 }
 
-/// Tìm thư mục cache trong `path` theo tên (sâu tối đa FIND_DEPTH, dừng khi hết giờ).
-fn find_caches(path: &str, comps: Vec<String>, skip: &HashSet<String>, until: Instant, buf: &mut [u64]) -> Vec<(Vec<String>, String)> {
+/// Thư mục chỉ chứa tệp log ở cấp đầu (thư mục con cho phép: log chia theo ngày). Không đọc được -> không nhận.
+fn only_logs(path: &str, buf: &mut [u64]) -> bool {
+    let mut ok = true;
+    du::list_dir(&nul(path), buf, |e| {
+        if e.attrs & ATTR_DIRECTORY == 0 && !is_log_file(&String::from_utf16_lossy(e.name)) {
+            ok = false;
+        }
+    })
+    .is_ok()
+        && ok
+}
+
+/// Thư mục `lower` (cha: `parents`) là loại dọn được nào: cache | crash | log (log còn phải qua `only_logs`).
+fn kind_of(parents: &[String], lower: &str) -> Option<&'static str> {
+    if is_cache(parents, lower) {
+        Some("cache")
+    } else if CRASH_NAMES.contains(&lower) {
+        Some("crash")
+    } else if LOG_NAMES.contains(&lower) && !parents.is_empty() {
+        Some("log")
+    } else {
+        None
+    }
+}
+
+/// Một thư mục tìm được: (các đoạn đường dẫn, đường dẫn, loại).
+type Hit = (Vec<String>, String, &'static str);
+
+/// Tìm thư mục cache / log / báo cáo lỗi trong `path` theo tên (sâu tối đa FIND_DEPTH, dừng khi hết giờ).
+/// `lbuf`: bộ đệm nhỏ riêng để xem bên trong thư mục log (bộ đệm chính đang được liệt kê dở).
+fn find_caches(path: &str, comps: Vec<String>, skip: &HashSet<String>, until: Instant, buf: &mut [u64], lbuf: &mut [u64]) -> Vec<Hit> {
     let last = comps.last().map(|s| s.to_lowercase()).unwrap_or_default();
-    if is_cache(&comps[..comps.len() - 1], &last) {
-        return vec![(comps, path.to_owned())];
+    if let Some(k) = kind_of(&comps[..comps.len() - 1], &last) {
+        if k != "log" || only_logs(path, lbuf) {
+            return vec![(comps, path.to_owned(), k)];
+        }
     }
     let mut hits = Vec::new();
     let mut stack = vec![(path.to_owned(), comps)];
@@ -771,11 +1018,11 @@ fn find_caches(path: &str, comps: Vec<String>, skip: &HashSet<String>, until: In
             if SKIP_NAMES.contains(&lower.as_str()) || skip.contains(&child.to_lowercase()) {
                 return;
             }
-            let cache = is_cache(&comps, &lower);
+            let kind = kind_of(&comps, &lower).filter(|&k| k != "log" || only_logs(&child, lbuf));
             let mut c = comps.clone();
             c.push(name);
-            if cache {
-                hits.push((c, child));
+            if let Some(k) = kind {
+                hits.push((c, child, k));
             } else if c.len() < FIND_DEPTH {
                 stack.push((child, c));
             }
@@ -788,12 +1035,15 @@ fn find_caches(path: &str, comps: Vec<String>, skip: &HashSet<String>, until: In
 /// Mỗi mục đo xong -> gửi chỉ số mục qua kênh `done`.
 pub struct Measure {
     cancel: AtomicBool,
+    /// Đo nền giữ khoá đọc trong mỗi thư mục; dọn giữ khoá ghi để tạm dừng việc đo.
+    io: RwLock<()>,
     /// việc chia XOAY VÒNG giữa các mục: mỗi mục một ngăn xếp (thư mục, là gốc), hàng `turn` = mục còn việc.
     /// Mục nhỏ xong ngay, không phải chờ sau kho cache hàng triệu tệp.
     queue: Mutex<Rr>,
     outstanding: AtomicUsize,
     left: Vec<AtomicUsize>,
-    sizes: Vec<Mutex<Size>>,
+    /// theo mục, rồi theo thư mục gốc (cùng thứ tự với `paths`)
+    sizes: Vec<Mutex<Vec<Size>>>,
     errors: Vec<Mutex<Option<String>>>,
     recent_after: i64,
 }
@@ -801,47 +1051,49 @@ pub struct Measure {
 /// Hàng việc xoay vòng của `Measure`.
 struct Rr {
     turn: VecDeque<u32>,
-    stacks: Vec<Vec<(String, bool)>>,
+    /// (thư mục, là gốc, chỉ số thư mục gốc trong `paths`)
+    stacks: Vec<Vec<(String, bool, u32)>>,
 }
 
 impl Rr {
     /// Một thư mục của mục đến lượt; mục còn việc thì xếp lại cuối hàng.
-    fn take(&mut self) -> Option<(u32, String, bool)> {
+    fn take(&mut self) -> Option<(u32, String, bool, u32)> {
         let i = self.turn.pop_front()?;
-        let (dir, root) = self.stacks[i as usize].pop()?;
+        let (dir, root, part) = self.stacks[i as usize].pop()?;
         if !self.stacks[i as usize].is_empty() {
             self.turn.push_back(i);
         }
-        Some((i, dir, root))
+        Some((i, dir, root, part))
     }
-    fn give(&mut self, i: u32, dirs: Vec<String>) {
+    fn give(&mut self, i: u32, part: u32, dirs: Vec<String>) {
         let st = &mut self.stacks[i as usize];
         if st.is_empty() {
             self.turn.push_back(i);
         }
-        st.extend(dirs.into_iter().map(|d| (d, false)));
+        st.extend(dirs.into_iter().map(|d| (d, false, part)));
     }
 }
 
 impl Measure {
-    fn start(items: &[ItemOut]) -> (Arc<Measure>, mpsc::Receiver<u32>) {
+    fn start(items: &[ItemOut], recent_after: i64) -> (Arc<Measure>, mpsc::Receiver<u32>) {
         let mut rr = Rr { turn: VecDeque::new(), stacks: vec![Vec::new(); items.len()] };
         let mut total = 0;
         for (i, it) in items.iter().enumerate() {
             if it.id != RECYCLE_ID && !it.paths.is_empty() {
-                rr.stacks[i] = it.paths.iter().map(|p| (p.clone(), true)).collect();
+                rr.stacks[i] = it.paths.iter().enumerate().map(|(k, p)| (p.clone(), true, k as u32)).collect();
                 total += it.paths.len();
                 rr.turn.push_back(i as u32);
             }
         }
         let m = Arc::new(Measure {
             cancel: AtomicBool::new(false),
+            io: RwLock::new(()),
             outstanding: AtomicUsize::new(total),
             left: items.iter().map(|it| AtomicUsize::new(if it.id == RECYCLE_ID { 0 } else { it.paths.len() })).collect(),
-            sizes: items.iter().map(|_| Mutex::new(Size::default())).collect(),
+            sizes: items.iter().map(|it| Mutex::new(vec![Size::default(); it.paths.len().max(1)])).collect(),
             errors: items.iter().map(|_| Mutex::new(None)).collect(),
             queue: Mutex::new(rr),
-            recent_after: now_ms() - RECENT_MS,
+            recent_after,
         });
         let (tx, rx) = mpsc::channel();
         for (i, l) in m.left.iter().enumerate() {
@@ -856,14 +1108,26 @@ impl Measure {
         (m, rx)
     }
 
+    /// Bỏ phần đo cũ của một mục đã đo lại. Chỉ gọi khi các luồng đo đang tạm dừng.
+    fn discard(&self, i: u32) {
+        if let Ok(mut q) = self.queue.lock() {
+            let n = q.stacks[i as usize].len();
+            q.stacks[i as usize].clear();
+            q.turn.retain(|&queued| queued != i);
+            self.outstanding.fetch_sub(n, Ordering::AcqRel);
+        }
+    }
+
     fn work(&self, done: &mpsc::Sender<u32>) {
         let mut buf = vec![0u64; du::BUF_U64];
         loop {
+            let Ok(io) = self.io.read() else { return };
             if self.cancel.load(Ordering::Relaxed) {
                 return;
             }
             let job = self.queue.lock().ok().and_then(|mut q| q.take());
-            let Some((i, dir, root)) = job else {
+            let Some((i, dir, root, part)) = job else {
+                drop(io);
                 if self.outstanding.load(Ordering::Acquire) == 0 {
                     return;
                 }
@@ -902,11 +1166,11 @@ impl Measure {
                 self.left[idx].fetch_add(subs.len(), Ordering::AcqRel);
                 self.outstanding.fetch_add(subs.len(), Ordering::AcqRel);
                 if let Ok(mut q) = self.queue.lock() {
-                    q.give(i, subs);
+                    q.give(i, part, subs);
                 }
             }
-            if let Ok(mut g) = self.sizes[idx].lock() {
-                g.add(&sz);
+            if let Some(slot) = self.sizes[idx].lock().ok().as_deref_mut().and_then(|v| v.get_mut(part as usize)) {
+                slot.add(&sz);
             }
             self.outstanding.fetch_sub(1, Ordering::AcqRel);
             if self.left[idx].fetch_sub(1, Ordering::AcqRel) == 1 {
@@ -921,7 +1185,18 @@ impl Measure {
         if it.id == RECYCLE_ID {
             return;
         }
-        let s = self.sizes[i].lock().map(|g| *g).unwrap_or_default();
+        let per: Vec<Size> = self.sizes[i].lock().map(|g| g.clone()).unwrap_or_default();
+        let mut s = Size::default();
+        for x in &per {
+            s.add(x);
+        }
+        // số liệu từng thư mục gốc (mục cố định chưa có `parts`: tạo, loại để trống)
+        if it.parts.len() != it.paths.len() {
+            it.parts = vec![PartOut::default(); it.paths.len()];
+        }
+        for (p, x) in it.parts.iter_mut().zip(&per) {
+            (p.bytes, p.files, p.recent_bytes, p.recent_files) = (x.bytes, x.files, x.recent_bytes, x.recent_files);
+        }
         it.bytes = s.bytes;
         it.files = s.files;
         it.recent_bytes = s.recent_bytes;
@@ -964,8 +1239,127 @@ fn app_label(comps: &[String]) -> (String, &'static str) {
         Some(a) => a.clone(),
         None => comps.last().cloned().unwrap_or_default(),
     };
-    let kind = if label.starts_with('.') { "dev" } else { "app" };
+    // thư mục ẩn của hồ sơ (.bun, .claude…) và cache của công cụ Node (env-paths: "<tên>-nodejs") = công cụ lập trình
+    let kind = if label.starts_with('.') || label.to_lowercase().ends_with("-nodejs") { "dev" } else { "app" };
     (label, kind)
+}
+
+/// Tên app đã cài -> tên gọn cho nhóm: bỏ "Uninstall ", phần trong ngoặc, phiên bản và x64 ở cuối
+/// ("Postman x64 12.36.0" -> "Postman", "oCam version 550.0" -> "oCam"; "Microsoft 365" giữ nguyên).
+fn clean_app_name(n: &str) -> String {
+    let n = n.trim();
+    let n = n.strip_prefix("Uninstall ").unwrap_or(n);
+    let n = n.split(" (").next().unwrap_or(n);
+    let mut words: Vec<&str> = n.split_whitespace().collect();
+    let versionish = |w: &str| {
+        let l = w.to_lowercase();
+        let digit = l.chars().any(|c| c.is_ascii_digit());
+        (digit && l.contains('.')) || (l.starts_with('v') && l[1..].starts_with(|c: char| c.is_ascii_digit())) || ["x64", "x86", "64-bit", "32-bit", "version", "-"].contains(&l.as_str())
+    };
+    while words.len() > 1 && words.last().is_some_and(|w| versionish(w)) {
+        words.pop();
+    }
+    let s = words.join(" ");
+    if s.is_empty() { n.to_owned() } else { s }
+}
+
+/// Ứng dụng Store của thư mục Packages\<Tên>_<mã nhà phát hành>.
+fn store_app<'a>(apps: &'a [super::apps::App], family: &str) -> Option<&'a super::apps::App> {
+    let pkg = family.split('_').next()?.to_lowercase();
+    let prefix = format!("s|{pkg}_");
+    apps.iter().find(|a| a.kind == "store" && a.id.to_lowercase().starts_with(&prefix))
+}
+
+/// Thư mục gốc của app chứa thư mục tìm được: (đường dẫn tương đối "Discord" / "Microsoft\OneDrive", đường dẫn đầy đủ).
+fn app_root(path: &str, comps: &[String], lower: &[String]) -> Option<(String, String)> {
+    if lower.first().is_some_and(|s| s == "packages") {
+        return None; // app Store có logo riêng
+    }
+    let known = KNOWN.iter().find(|&&(p, _, _)| lower.len() >= p.len() && p.iter().zip(lower).all(|(a, b)| a == b)).map(|k| k.0.len());
+    let n = known.unwrap_or(if VENDORS.contains(&lower[0].as_str()) && comps.len() > 2 { 2 } else { 1 });
+    if n == 0 || n >= comps.len() {
+        return None;
+    }
+    // bỏ (comps.len() - n) đoạn cuối của đường dẫn
+    let mut root = path;
+    for _ in 0..comps.len() - n {
+        root = &root[..root.rfind('\\')?];
+    }
+    Some((comps[..n].join("\\"), root.to_owned()))
+}
+
+/// Nơi có thể có exe của app: thư mục gốc tìm được, thư mục cài, và cùng tên trong Local, Roaming, Local\Programs,
+/// Program Files (64 / 32-bit).
+fn exe_dirs(f: &Folders, rels: &[String], roots: Vec<String>) -> Vec<String> {
+    let mut bases: Vec<String> = [f.local.clone(), f.roaming.clone(), f.local.as_ref().map(|l| format!("{l}\\Programs"))].into_iter().flatten().collect();
+    bases.extend(["ProgramFiles", "ProgramFiles(x86)"].iter().filter_map(|v| std::env::var(v).ok()));
+    let mut out = roots;
+    for r in rels {
+        // "Microsoft\OneDrive" cũng có thể cài thành "Program Files\Microsoft OneDrive"
+        let flat = r.replace('\\', " ");
+        for b in &bases {
+            out.push(format!("{}\\{r}", b.trim_end_matches('\\')));
+            if flat != *r {
+                out.push(format!("{}\\{flat}", b.trim_end_matches('\\')));
+            }
+        }
+    }
+    let mut seen = HashSet::new();
+    out.retain(|d| seen.insert(d.to_lowercase()));
+    out
+}
+
+/// exe không phải chính ứng dụng (trình cập nhật, gỡ cài đặt, báo lỗi…): không lấy icon từ đó.
+const NOT_APP_EXE: &[&str] = &["update", "squirrel", "uninstall", "uninst", "unins000", "crashpad_handler", "elevate", "notification_helper", "createdump", "setup", "updater"];
+
+/// Exe của app trong `dirs` (cấp 1, và cấp 2 trong thư mục kiểu app-1.2.3 / Application / bin / số phiên bản) có tên
+/// khớp một trong `keys` (chữ thường, chỉ chữ + số). Tên trùng hẳn được ưu tiên hơn tên bắt đầu bằng khoá.
+fn find_exe(dirs: &[String], keys: &[String], buf: &mut [u64]) -> Option<String> {
+    fn consider(best: &mut Option<(u8, String)>, keys: &[String], dir: &str, name: &str) {
+        let Some(stem) = name.strip_suffix(".exe").or_else(|| name.strip_suffix(".EXE")) else { return };
+        let s = super::leftovers::norm(stem);
+        let sc = if NOT_APP_EXE.iter().any(|x| s.starts_with(&super::leftovers::norm(x))) {
+            0
+        } else if keys.contains(&s) {
+            2
+        } else if keys.iter().any(|k| k.len() >= 4 && s.len() >= 4 && (s.starts_with(k.as_str()) || k.starts_with(s.as_str()))) {
+            1
+        } else {
+            0
+        };
+        if sc > best.as_ref().map_or(0, |b| b.0) {
+            *best = Some((sc, format!("{dir}\\{name}")));
+        }
+    }
+    let mut best: Option<(u8, String)> = None;
+    for d in dirs {
+        let mut subs = Vec::new();
+        let _ = du::list_dir(&nul(d), buf, |e| {
+            let name = String::from_utf16_lossy(e.name);
+            if e.attrs & ATTR_DIRECTORY == 0 {
+                consider(&mut best, keys, d, &name);
+            } else if e.attrs & ATTR_REPARSE == 0 {
+                let l = name.to_lowercase();
+                if l.starts_with("app-") || l == "application" || l == "bin" || l == "current" || l.starts_with(|c: char| c.is_ascii_digit()) {
+                    subs.push(name);
+                }
+            }
+        });
+        // bản mới nhất trước (app-1.0.9 > app-1.0.8)
+        subs.sort_unstable_by(|a, b| b.cmp(a));
+        for s in subs.iter().take(3) {
+            let sd = format!("{d}\\{s}");
+            let _ = du::list_dir(&nul(&sd), buf, |e| {
+                if e.attrs & ATTR_DIRECTORY == 0 {
+                    consider(&mut best, keys, &sd, &String::from_utf16_lossy(e.name));
+                }
+            });
+        }
+        if best.as_ref().is_some_and(|b| b.0 == 2) {
+            break;
+        }
+    }
+    best.map(|b| b.1)
 }
 
 /// Ghi chú (khoá yml) + mức an toàn của một nhóm cache.
@@ -1107,6 +1501,8 @@ fn delete_open(h: *mut c_void) -> bool {
 struct Counts {
     removed: u64,
     skipped: u64,
+    skipped_bytes: u64,
+    skipped_recent_bytes: u64,
     kept_recent: u64,
     bytes: u64,
 }
@@ -1115,6 +1511,8 @@ impl Counts {
     fn add(&mut self, o: &Counts) {
         self.removed += o.removed;
         self.skipped += o.skipped;
+        self.skipped_bytes += o.skipped_bytes;
+        self.skipped_recent_bytes += o.skipped_recent_bytes;
         self.kept_recent += o.kept_recent;
         self.bytes += o.bytes;
     }
@@ -1147,7 +1545,8 @@ struct Deleter<'t> {
     queue: Mutex<Vec<Work>>,
     outstanding: AtomicUsize,
     counts: Vec<Mutex<Counts>>,
-    cutoff: i64,
+    recent_after: i64,
+    keep_recent: bool,
     tally: &'t Tally,
 }
 
@@ -1179,7 +1578,7 @@ pub struct CleanProgress {
 
 impl Deleter<'_> {
     /// Dọn bên trong `roots` (mục, đường dẫn). Trả số liệu theo mục + lỗi theo mục.
-    fn run(n_items: usize, roots: &[(usize, String)], cutoff: i64, tally: &Tally) -> (Vec<Counts>, Vec<Option<String>>) {
+    fn run(n_items: usize, roots: &[(usize, String)], recent_after: i64, keep_recent: bool, tally: &Tally) -> (Vec<Counts>, Vec<Option<String>>) {
         let mut errors = vec![None; n_items];
         let mut work = Vec::new();
         for (item, path) in roots {
@@ -1193,7 +1592,8 @@ impl Deleter<'_> {
             outstanding: AtomicUsize::new(work.len()),
             queue: Mutex::new(work),
             counts: (0..n_items).map(|_| Mutex::new(Counts::default())).collect(),
-            cutoff,
+            recent_after,
+            keep_recent,
             tally,
         };
         std::thread::scope(|s| {
@@ -1223,7 +1623,7 @@ impl Deleter<'_> {
                     match child {
                         Some(h) => {
                             let item = parent.item;
-                            let node = Arc::new(DirNode { h, parent: Some(parent), pending: AtomicUsize::new(1), remove: mtime < self.cutoff, item });
+                            let node = Arc::new(DirNode { h, parent: Some(parent), pending: AtomicUsize::new(1), remove: !self.keep_recent || mtime < self.recent_after, item });
                             self.list(node, &mut buf, &mut entries);
                         }
                         None => {
@@ -1259,7 +1659,7 @@ impl Deleter<'_> {
                 c.skipped += 1; // liên kết: không đụng tới (cả liên kết lẫn nơi nó trỏ tới)
             } else if attrs & ATTR_DIRECTORY != 0 {
                 subs.push(Work::Open { parent: node.clone(), name, mtime });
-            } else if mtime >= self.cutoff {
+            } else if self.keep_recent && mtime >= self.recent_after {
                 c.kept_recent += 1;
             } else {
                 // share = 0: tệp đang được mở ở đâu đó -> mở thất bại -> bỏ qua, không hỏi.
@@ -1269,7 +1669,13 @@ impl Deleter<'_> {
                         c.removed += 1;
                         c.bytes += size;
                     }
-                    _ => c.skipped += 1,
+                    _ => {
+                        c.skipped += 1;
+                        c.skipped_bytes += size;
+                        if mtime >= self.recent_after {
+                            c.skipped_recent_bytes += size;
+                        }
+                    }
                 }
             }
         }
@@ -1331,7 +1737,7 @@ fn summary(items: &[ItemOut]) -> String {
     use std::fmt::Write;
     let mut s = String::with_capacity(SUMMARY_MAX + 64);
     // cache nhỏ không hiện trên giao diện -> cũng không gửi cho AI
-    let items: Vec<&ItemOut> = items.iter().filter(|x| x.group != "cache" || x.pending || x.bytes >= CACHE_MIN).collect();
+    let items: Vec<&ItemOut> = items.iter().filter(|x| !is_found_group(x.group) || x.pending || x.bytes >= CACHE_MIN).collect();
     let total: u64 = items.iter().filter(|x| x.error.is_none()).map(|x| x.bytes).sum();
     let _ = writeln!(
         s,
@@ -1350,6 +1756,14 @@ fn summary(items: &[ItemOut]) -> String {
         };
         if it.recent_bytes > 0 {
             let _ = write!(line, " · mới {}", du::sz(it.recent_bytes));
+        }
+        line.push_str(match it.group {
+            "dev" => " · công cụ lập trình / thư mục ẩn",
+            "other" => " · không rõ của ứng dụng nào",
+            _ => "",
+        });
+        if !it.kinds.is_empty() {
+            let _ = write!(line, " · gồm {}", it.kinds.join("+"));
         }
         line.push_str(if it.safety == "safe" { " · an toàn" } else { " · cân nhắc" });
         if it.default_on {
@@ -1389,14 +1803,14 @@ mod tests {
     use std::path::PathBuf;
 
     fn bench_clean(path: &str) -> (u64, u64) {
-        let c = clean_one(path, i64::MAX);
+        let c = clean_one(path, false);
         (c.removed, c.skipped)
     }
 
-    fn clean_one(path: &str, cutoff: i64) -> Counts {
+    fn clean_one(path: &str, keep_recent: bool) -> Counts {
         enable_privileges();
         let tally = Tally { files: AtomicU64::new(0), bytes: AtomicU64::new(0), item: AtomicUsize::new(0) };
-        let (c, e) = Deleter::run(1, &[(0, path.to_owned())], cutoff, &tally);
+        let (c, e) = Deleter::run(1, &[(0, path.to_owned())], now_ms() - RECENT_MS, keep_recent, &tally);
         assert_eq!(tally.files.load(Ordering::Relaxed), c[0].removed + c[0].skipped + c[0].kept_recent, "bộ đếm tiến độ khớp số liệu");
         assert!(e[0].is_none(), "{:?}", e[0]);
         c[0]
@@ -1432,7 +1846,7 @@ mod tests {
             .map(|o| o.status.success())
             .unwrap_or(false);
 
-        let c = clean_one(root.to_str().unwrap(), i64::MAX);
+        let c = clean_one(root.to_str().unwrap(), false);
         assert!(root.is_dir(), "giữ lại gốc");
         assert!(!root.join("a.tmp").exists());
         assert!(!root.join("ro.txt").exists(), "xoá cả tệp chỉ đọc");
@@ -1474,9 +1888,75 @@ mod tests {
     fn keep_recent_keeps_new_files() {
         let root = tmp("recent");
         fs::write(root.join("new.tmp"), b"abc").unwrap();
-        let c = clean_one(root.to_str().unwrap(), now_ms() - RECENT_MS);
+        let c = clean_one(root.to_str().unwrap(), true);
         assert!(root.join("new.tmp").exists());
         assert_eq!((c.removed, c.kept_recent), (0, 1));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn apply_reports_skipped_file_sizes_and_remeasures_only_selected_items() {
+        let root = tmp("apply-bytes");
+        let other = root.join("other");
+        let selected = root.join("selected");
+        fs::create_dir(&other).unwrap();
+        fs::create_dir(&selected).unwrap();
+        fs::write(other.join("other.tmp"), b"other").unwrap();
+        let old = selected.join("old.tmp");
+        fs::write(&old, b"ab").unwrap();
+        let old_file = fs::OpenOptions::new().write(true).open(&old).unwrap();
+        old_file.set_modified(SystemTime::now() - Duration::from_secs(2 * 24 * 60 * 60)).unwrap();
+        drop(old_file);
+        fs::write(selected.join("recent.tmp"), b"abc").unwrap();
+        fs::write(selected.join("delete.tmp"), b"12345").unwrap();
+        let old_locked = fs::File::open(&old).unwrap();
+        let recent_locked = fs::File::open(selected.join("recent.tmp")).unwrap();
+
+        let item = |id: &str, path: &std::path::Path| row(id.into(), "temp", id.into(), String::new(), vec![path.to_str().unwrap().into()], "safe", false, None);
+        let mut untouched = item("other", &other);
+        untouched.bytes = 999;
+        let cleaner = Cleaner::default();
+        *cleaner.plan.lock().unwrap() = Some(Plan {
+            id: 1,
+            created: Instant::now(),
+            items: vec![untouched, item("selected", &selected)],
+        });
+        let out = cleaner.apply(1, &["selected".into()], &HashMap::new(), false, |_| {}).unwrap();
+        assert_eq!(out.items.len(), 1);
+        assert_eq!(out.items[0].id, "selected");
+        assert_eq!((out.items[0].bytes, out.items[0].recent_bytes), (5, 3));
+        let r = &out.results[0];
+        assert_eq!((r.bytes, r.skipped_bytes, r.skipped_recent_bytes), (5, 5, 3));
+        assert_eq!(cleaner.plan.lock().unwrap().as_ref().unwrap().items[0].bytes, 999);
+        assert!(other.join("other.tmp").is_file());
+        drop(recent_locked);
+        drop(old_locked);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Dọn MỘT PHẦN: chỉ thư mục gốc đã chọn bị dọn, chỉ số sai bị bỏ qua, mục được đo lại theo từng thư mục.
+    #[test]
+    fn apply_cleans_only_the_chosen_parts() {
+        let root = tmp("apply-parts");
+        let (cache, logs) = (root.join("Cache"), root.join("logs"));
+        fs::create_dir(&cache).unwrap();
+        fs::create_dir(&logs).unwrap();
+        fs::write(cache.join("a.bin"), b"1234567").unwrap();
+        fs::write(logs.join("main.log"), b"abc").unwrap();
+        let mut it = row("cache:app".into(), "cache", "App".into(), String::new(), vec![cache.to_string_lossy().into(), logs.to_string_lossy().into()], "safe", false, None);
+        it.parts = vec![PartOut { kind: "cache", ..Default::default() }, PartOut { kind: "log", ..Default::default() }];
+        let cleaner = Cleaner::default();
+        *cleaner.plan.lock().unwrap() = Some(Plan { id: 1, created: Instant::now(), items: vec![it] });
+        let parts: HashMap<String, Vec<usize>> = [("cache:app".to_string(), vec![1, 7])].into();
+        let out = cleaner.apply(1, &["cache:app".into()], &parts, false, |_| {}).unwrap();
+        assert!(cache.join("a.bin").is_file(), "cache không được chọn -> giữ");
+        assert!(!logs.join("main.log").exists(), "log đã chọn -> dọn");
+        assert_eq!(out.results[0].bytes, 3);
+        let p = &out.items[0].parts;
+        assert_eq!((p[0].kind, p[0].bytes, p[1].kind, p[1].bytes), ("cache", 7, "log", 0), "đo lại theo từng thư mục");
+        assert_eq!(out.items[0].bytes, 7);
+        let none: HashMap<String, Vec<usize>> = [("cache:app".to_string(), vec![9])].into();
+        assert!(cleaner.apply(1, &["cache:app".into()], &none, false, |_| {}).is_err(), "không chỉ số hợp lệ -> không dọn gì");
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -1489,9 +1969,89 @@ mod tests {
         assert_eq!(app_label(&v(&["Packages", "Microsoft.WindowsTerminal_8wekyb3d8bbwe", "AC", "INetCache"])).0, "Microsoft.WindowsTerminal");
         assert_eq!(app_label(&v(&["JetBrains", "IntelliJIdea2024.1", "caches"])).0, "JetBrains IntelliJIdea2024.1");
         assert_eq!(app_label(&v(&["Some Vendor", "Some App", "Cache"])).0, "Some Vendor");
-        assert_eq!(app_label(&v(&["Microsoft", "OneDrive", "cache"])).0, "Microsoft OneDrive");
+        assert_eq!(app_label(&v(&["Microsoft", "OneDrive", "cache"])).0, "OneDrive");
+        assert_eq!(app_label(&v(&["Microsoft", "Some Tool", "cache"])).0, "Microsoft Some Tool");
         assert!(is_cache(&v(&[".nuget"]), "packages"));
         assert!(!is_cache(&v(&["x"]), "packages"));
+        // log / báo cáo lỗi / cache Service Worker
+        assert_eq!(kind_of(&v(&["discord"]), "logs"), Some("log"));
+        assert_eq!(kind_of(&[], "logs"), None, "log ở thẳng AppData: không biết của app nào");
+        assert_eq!(kind_of(&v(&["BraveSoftware", "Brave-Browser", "User Data"]), "crashpad"), Some("crash"));
+        assert_eq!(kind_of(&v(&["discord", "Service Worker"]), "cachestorage"), Some("cache"));
+        assert_eq!(kind_of(&v(&["x"]), "settings"), None);
+        assert!(is_log_file("main.log") && is_log_file("renderer.log.1") && is_log_file("trace.etl") && is_log_file("old.txt"));
+        assert!(!is_log_file("data.db") && !is_log_file("config.json") && !is_log_file("Local State"));
+    }
+
+    /// `cargo test --release --lib cleanup::tests::list_app_groups -- --ignored --nocapture`: các nhóm cache của app trên
+    /// máy này (tên, có icon không, gồm những gì, bao nhiêu thư mục) – để xem nhận diện có đúng không.
+    #[test]
+    #[ignore = "in danh sách trên máy thật"]
+    fn list_app_groups() {
+        let t = Instant::now();
+        let items = discover(&Folders::get(), crate::is_elevated());
+        let apps: Vec<&ItemOut> = items.iter().filter(|x| is_found_group(x.group)).collect();
+        let icons = apps.iter().filter(|x| !x.icon.is_empty()).count();
+        println!("{} nhóm, {icons} có icon, {} ms", apps.len(), t.elapsed().as_millis());
+        for a in apps {
+            println!("  {:<6} {:<34} {:<16} {:>3} thư mục  {}", a.group, a.name, a.kinds.join("+"), a.paths.len(), if a.icon.is_empty() { "" } else { "[icon]" });
+        }
+    }
+
+    #[test]
+    fn app_names_are_cleaned_and_roots_found() {
+        assert_eq!(clean_app_name("Postman x64 12.36.0"), "Postman");
+        assert_eq!(clean_app_name("oCam version 550.0"), "oCam");
+        assert_eq!(clean_app_name("Uninstall Lunar Client"), "Lunar Client");
+        assert_eq!(clean_app_name("PowerToys (Preview) x64"), "PowerToys");
+        assert_eq!(clean_app_name("Microsoft 365"), "Microsoft 365", "số không có dấu chấm không phải phiên bản");
+        assert_eq!(clean_app_name("Unity 2022.3.62f2"), "Unity");
+        let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let low = |c: &[String]| c.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>();
+        let c = v(&["discord", "Cache", "Cache_Data"]);
+        assert_eq!(app_root(r"C:\U\AppData\Roaming\discord\Cache\Cache_Data", &c, &low(&c)), Some(("discord".into(), r"C:\U\AppData\Roaming\discord".into())));
+        let c = v(&["Microsoft", "OneDrive", "logs"]);
+        assert_eq!(app_root(r"C:\U\Local\Microsoft\OneDrive\logs", &c, &low(&c)), Some((r"Microsoft\OneDrive".into(), r"C:\U\Local\Microsoft\OneDrive".into())));
+        let c = v(&["Packages", "Microsoft.WindowsStore_8wekyb3d8bbwe", "AC", "INetCache"]);
+        assert_eq!(app_root("x", &c, &low(&c)), None, "app Store dùng logo riêng");
+    }
+
+    /// exe của app: tên khớp được ưu tiên, bỏ qua Update.exe / trình gỡ, tìm cả trong app-1.2.3.
+    #[test]
+    fn finds_app_exe_next_to_its_data() {
+        let root = std::env::temp_dir().join(format!("fomeg_exe_{}", std::process::id()));
+        let app = root.join("Discord");
+        fs::create_dir_all(app.join("app-1.0.9")).unwrap();
+        for f in ["Update.exe", "unins000.exe"] {
+            fs::write(app.join(f), b"x").unwrap();
+        }
+        fs::write(app.join("app-1.0.9").join("Discord.exe"), b"x").unwrap();
+        let mut buf = vec![0u64; 2048];
+        let got = find_exe(&[app.to_string_lossy().into_owned()], &["discord".into()], &mut buf).unwrap();
+        assert!(got.ends_with(r"app-1.0.9\Discord.exe"), "{got}");
+        assert!(find_exe(&[app.to_string_lossy().into_owned()], &["slack".into()], &mut buf).is_none());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Thư mục tên "logs" chỉ được nhận khi mọi tệp ở cấp đầu là tệp log.
+    #[test]
+    fn log_folders_need_only_log_files() {
+        let root = std::env::temp_dir().join(format!("fomeg_logs_{}", std::process::id()));
+        let (good, bad) = (root.join("App").join("logs"), root.join("Other").join("log"));
+        fs::create_dir_all(good.join("2026-11-27")).unwrap();
+        fs::create_dir_all(&bad).unwrap();
+        fs::write(good.join("main.log"), b"x").unwrap();
+        fs::write(good.join("main.log.1"), b"x").unwrap();
+        fs::write(bad.join("main.log"), b"x").unwrap();
+        fs::write(bad.join("state.db"), b"x").unwrap();
+        let mut buf = vec![0u64; 1024];
+        assert!(only_logs(&good.to_string_lossy(), &mut buf));
+        assert!(!only_logs(&bad.to_string_lossy(), &mut buf), "có tệp dữ liệu -> không dọn");
+        let (mut b1, mut b2) = (vec![0u64; du::BUF_U64], vec![0u64; 1024]);
+        let hits = find_caches(&root.to_string_lossy(), vec!["fomeg_logs".into()], &HashSet::new(), Instant::now() + Duration::from_secs(5), &mut b1, &mut b2);
+        assert_eq!(hits.len(), 1, "chỉ App\\logs: {hits:?}");
+        assert_eq!(hits[0].2, "log");
+        fs::remove_dir_all(&root).unwrap();
     }
 
     /// Quét thật trên máy này (chỉ đọc): in số liệu và thời gian.
@@ -1513,7 +2073,7 @@ mod tests {
         }
         let items = c.plan.lock().unwrap().as_ref().unwrap().items.clone();
         assert!(items.iter().all(|x| !x.pending));
-        let items: Vec<ItemOut> = items.into_iter().filter(|x| x.group != "cache" || x.bytes >= CACHE_MIN).collect();
+        let items: Vec<ItemOut> = items.into_iter().filter(|x| !is_found_group(x.group) || x.bytes >= CACHE_MIN).collect();
         for it in &items {
             println!("{:>8} {:>7} tệp  {:<28} {} ({} đường dẫn){}", du::sz(it.bytes), it.files, it.id, it.name, it.paths.len(), it.error.as_deref().map(|e| format!(" – {e}")).unwrap_or_default());
         }

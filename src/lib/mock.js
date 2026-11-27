@@ -699,12 +699,26 @@ export function createMockBackend() {
   const NOTE_APP = 'Thư mục cache của ứng dụng (Cache, Code Cache, GPUCache…). Ứng dụng tự tạo lại; lần mở đầu có thể chậm hơn một chút. Tệp đang dùng được bỏ qua.';
   const NOTE_BROWSER = 'Cache trình duyệt (ảnh, script, video của trang web đã tải). Không mất mật khẩu, lịch sử hay dấu trang. Đóng trình duyệt trước để dọn được nhiều hơn.';
   const NOTE_DEV = 'Cache của công cụ lập trình (gói, bản build đã tải). Xoá an toàn nhưng lần build / cài sau phải tải lại, có thể mất thời gian và dung lượng mạng.';
+  // nhóm cache của app gồm những gì (backend `kinds`: cache | log | crash), như core/cleanup.rs
+  const MOCK_KINDS = { 'cache:google chrome': ['cache', 'crash'], 'cache:microsoft edge': ['cache', 'log', 'crash'], 'cache:vs code': ['cache', 'log', 'crash'], 'cache:discord': ['cache', 'log', 'crash'], 'cache:spotify': ['cache', 'log'] };
   const cleanupBase = () => {
     const day = Date.now() - 3 * 864e5;
-    const it = (id, group, name, note, paths, bytes, files, recent, safety, on, error = null) => ({
-      id, group, name, note, paths, bytes, files, recent_bytes: recent, recent_files: recent ? Math.ceil(files / 20) : 0,
-      newest: files ? day : 0, safety, default_on: on, pending: false, error,
-    });
+    const it = (id, group, name, note, paths, bytes, files, recent, safety, on, error = null) => {
+      // nhóm tìm được: thêm thư mục log / báo cáo lỗi cạnh thư mục cache đầu tiên, số liệu từng thư mục (`parts`)
+      const kinds = group === 'cache' || group === 'dev' || group === 'other' ? MOCK_KINDS[id] || ['cache'] : null;
+      const base = paths[0]?.slice(0, paths[0].lastIndexOf('\\')) || '';
+      const all = kinds ? [...paths, ...(kinds.includes('log') ? [base + '\\logs'] : []), ...(kinds.includes('crash') ? [base + '\\Crashpad'] : [])] : paths;
+      const share = all.map((p, k) => (k < paths.length ? 0.85 / paths.length : (0.15 * (all.length - paths.length === 2 && p.endsWith('Crashpad') ? 1 / 3 : all.length - paths.length === 2 ? 2 / 3 : 1))));
+      const parts = all.map((p, k) => ({
+        kind: !kinds ? '' : k < paths.length ? 'cache' : p.endsWith('Crashpad') ? 'crash' : 'log',
+        bytes: Math.round(bytes * share[k]), files: Math.max(1, Math.round(files * share[k])), recent_bytes: Math.round(recent * share[k]), recent_files: recent ? 1 : 0,
+      }));
+      return {
+        id, group, name, note, paths: all, bytes, files, recent_bytes: recent, recent_files: recent ? Math.ceil(files / 20) : 0,
+        newest: files ? day : 0, safety, default_on: on, pending: false, error, parts,
+        ...(kinds ? { kinds } : {}),
+      };
+    };
     return [
       it('user_temp', 'temp', 'Tệp tạm của bạn', 'Thư mục %TEMP%: tệp tạm của chương trình và bộ cài. Windows và ứng dụng tự tạo lại khi cần.', [L + '\\Temp'], 4.6 * GB, 24919, 320 * MB, 'safe', true),
       it('windows_temp', 'temp', 'Tệp tạm của Windows', 'Windows\\Temp: tệp tạm của Windows, dịch vụ và bộ cài chạy quyền hệ thống.', ['C:\\Windows\\Temp'], 612 * MB, 1840, 12 * MB, 'safe', true),
@@ -720,10 +734,10 @@ export function createMockBackend() {
       it('cache:vs code', 'cache', 'VS Code', NOTE_APP, [R + '\\Code\\Cache', R + '\\Code\\CachedData', R + '\\Code\\Code Cache', R + '\\Code\\GPUCache'], 610 * MB, 1320, 30 * MB, 'safe', false),
       it('cache:discord', 'cache', 'Discord', NOTE_APP, [R + '\\discord\\Cache', R + '\\discord\\Code Cache', R + '\\discord\\GPUCache'], 245 * MB, 980, 8 * MB, 'safe', false),
       it('cache:spotify', 'cache', 'Spotify', NOTE_APP, [L + '\\Spotify\\Data'], 1.1 * GB, 3100, 60 * MB, 'safe', false),
-      it('cache:npm', 'cache', 'npm', NOTE_DEV, [L + '\\npm-cache'], 2.4 * GB, 51000, 0, 'caution', false),
-      it('cache:gradle', 'cache', 'Gradle', NOTE_DEV, ['C:\\Users\\An\\.gradle\\caches'], 3.9 * GB, 82000, 0, 'caution', false),
-      it('cache:uv', 'cache', 'uv', NOTE_DEV, [L + '\\uv\\cache'], 9.7 * GB, 1250000, 0, 'caution', false),
-      it('cache:~/.cache', 'cache', '~/.cache', 'Thư mục cache chung của nhiều công cụ; có thể chứa mô hình AI đã tải (Hugging Face, LM Studio…) rất lớn. Xoá thì lần dùng sau phải tải lại.', ['C:\\Users\\An\\.cache'], 14.2 * GB, 640, 0, 'caution', false),
+      it('cache:npm', 'dev', 'npm', NOTE_DEV, [L + '\\npm-cache'], 2.4 * GB, 51000, 0, 'caution', false),
+      it('cache:gradle', 'dev', 'Gradle', NOTE_DEV, ['C:\\Users\\An\\.gradle\\caches'], 3.9 * GB, 82000, 0, 'caution', false),
+      it('cache:uv', 'dev', 'uv', NOTE_DEV, [L + '\\uv\\cache'], 9.7 * GB, 1250000, 0, 'caution', false),
+      it('cache:~/.cache', 'dev', '~/.cache', 'Thư mục cache chung của nhiều công cụ; có thể chứa mô hình AI đã tải (Hugging Face, LM Studio…) rất lớn. Xoá thì lần dùng sau phải tải lại.', ['C:\\Users\\An\\.cache'], 14.2 * GB, 640, 0, 'caution', false),
     ];
   };
   // ---------- Ứng dụng đã cài ----------
@@ -826,46 +840,164 @@ export function createMockBackend() {
   };
   handlers.leftovers_forget = async ({ name }) => { leftList = leftList.filter((f) => f.owner !== name); };
 
-  const cleaned = new Set();
+  // ---------- Biến môi trường (giống core/env_vars.rs) ----------
+  const envVars = {
+    user: [
+      ['Path', String.raw`%USERPROFILE%\AppData\Local\Microsoft\WindowsApps;C:\Users\An\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\An\.cargo\bin;C:\old\tools\bin;C:\WINDOWS\system32;%USERPROFILE%\go\bin`, true],
+      ['GOPATH', String.raw`%USERPROFILE%\go`, true],
+      ['OPENAI_API_KEY', 'sk-mock-1234567890abcdef', false],
+      ['TEMP', String.raw`%USERPROFILE%\AppData\Local\Temp`, true],
+      ['TMP', String.raw`%USERPROFILE%\AppData\Local\Temp`, true],
+      ['OneDrive', String.raw`C:\Users\An\OneDrive`, false],
+    ],
+    system: [
+      ['Path', String.raw`%SystemRoot%\system32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SYSTEMROOT%\System32\WindowsPowerShell\v1.0\;C:\Program Files\nodejs\;C:\Program Files\Git\cmd;C:\Program Files\Docker\Docker\resources\bin;C:\Python27\Scripts`, true],
+      ['ComSpec', String.raw`%SystemRoot%\system32\cmd.exe`, true],
+      ['JAVA_HOME', String.raw`C:\Program Files\Java\jdk-17`, false],
+      ['NUMBER_OF_PROCESSORS', '12', false],
+      ['OS', 'Windows_NT', false],
+      ['PATHEXT', '.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.PY', false],
+      ['PROCESSOR_ARCHITECTURE', 'AMD64', false],
+      ['PSModulePath', String.raw`%ProgramFiles%\WindowsPowerShell\Modules;%SystemRoot%\system32\WindowsPowerShell\v1.0\Modules`, true],
+      ['TEMP', String.raw`%SystemRoot%\TEMP`, true],
+      ['windir', '%SystemRoot%', true],
+    ],
+  };
+  const envExpandMap = { USERPROFILE: String.raw`C:\Users\An`, SYSTEMROOT: String.raw`C:\WINDOWS`, PROGRAMFILES: String.raw`C:\Program Files` };
+  const envMissing = [String.raw`c:\old\tools\bin`, String.raw`c:\python27\scripts`, String.raw`c:\program files\java\jdk-17`];
+  const envExpand = (s) => s.replace(/%([^%]+)%/g, (m, n) => envExpandMap[n.toUpperCase()] ?? m);
+  const envKey = (s) => envExpand(s).trim().replace(/[\\/]+$/, '').toLowerCase();
+  const envLooksPath = (s) => /^[a-z]:[\\/]/i.test(s) || s.startsWith('\\\\');
+  const envList = /^(path|psmodulepath|pathext|classpath|pythonpath|include|lib|libpath|node_path)$/i;
+  const envProtected = /^(path|pathext|comspec|windir|systemroot|os|psmodulepath|temp|tmp|username|driverdata|number_of_processors|processor_\w+)$/i;
+  let envHistory = [];
+  const envErr = (vi, en) => new Error(i18n.locale === 'en' ? en : vi);
+  function envBuild() {
+    const sysLists = new Map(envVars.system.filter(([n]) => envList.test(n)).map(([n, v]) => [n.toUpperCase(), new Set(v.split(';').filter(Boolean).map(envKey))]));
+    const out = [];
+    for (const scope of ['user', 'system']) {
+      for (const [name, value, expand] of envVars[scope]) {
+        const list = envList.test(name) || (value.includes(';') && value.split(';').filter(Boolean).every((x) => envLooksPath(x) || x.startsWith('%')));
+        const seen = new Set();
+        const other = scope === 'user' ? sysLists.get(name.toUpperCase()) : null;
+        const entries = list
+          ? value.split(';').map((x) => x.trim()).filter(Boolean).map((raw) => {
+              const expanded = envExpand(raw);
+              const key = envKey(raw);
+              const e = { raw, expanded, exists: envLooksPath(expanded) ? !envMissing.includes(key) : null, dup: seen.has(key), other: !!other?.has(key) };
+              seen.add(key);
+              return e;
+            })
+          : [];
+        out.push({
+          name, scope, value, expand, expanded: expand ? envExpand(value) : value, list, entries,
+          secret: /KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL|AUTH|PRIVATE|COOKIE|SESSION/i.test(name),
+          protected: envProtected.test(name),
+          issues: entries.filter((e) => e.exists === false || e.dup || e.other).length,
+        });
+      }
+    }
+    return out;
+  }
+  handlers.env_list = async () => { await sleep(40); return { vars: envBuild(), can_system: true, took_ms: 3, history: clone(envHistory) }; };
+  function envApply(scope, name, value, undoOf) {
+    const list = envVars[scope];
+    if (!list) throw envErr('Phạm vi không hợp lệ.', 'Invalid scope.');
+    if (!name || /[=]/.test(name) || name.trim() !== name) throw envErr('Tên biến không hợp lệ.', 'Invalid variable name.');
+    const i = list.findIndex(([n]) => n.toLowerCase() === name.toLowerCase());
+    const old = i >= 0 ? { value: list[i][1], expand: list[i][2] } : null;
+    if (value == null && envProtected.test(name)) throw envErr(`Không xoá được ${name}: Windows và nhiều chương trình cần biến này.`, `Can’t delete ${name}: Windows and many programs need it.`);
+    if (value != null && /^path$/i.test(name) && !value.replace(/;/g, '').trim()) throw envErr('Không để trống Path.', 'Path can’t be empty.');
+    const nv = value == null ? null : { value, expand: value.includes('%') || !!old?.expand };
+    if (JSON.stringify(old) === JSON.stringify(nv)) return null;
+    if (nv == null) list.splice(i, 1);
+    else if (i >= 0) list[i] = [list[i][0], nv.value, nv.expand];
+    else list.push([name, nv.value, nv.expand]);
+    const c = { id: (envHistory.at(-1)?.id || 0) + 1, at: Date.now(), scope, name: i >= 0 ? list[i]?.[0] || name : name, old, new: nv, ...(undoOf ? { undo_of: undoOf } : {}) };
+    envHistory = [...envHistory, c].slice(-100);
+    return c;
+  }
+  handlers.env_set = async ({ scope, name, value }) => { await sleep(60); return envApply(scope, name, value); };
+  handlers.env_restore = async ({ id }) => {
+    await sleep(60);
+    const c = envHistory.find((x) => x.id === id);
+    if (!c) throw envErr('Không tìm thấy thay đổi này trong lịch sử.', 'This change is not in the history.');
+    return envApply(c.scope, c.name, c.old?.value ?? null, id);
+  };
+
   handlers.cleanup_scan = async () => {
     await sleep(900);
     const id = ++cleanupId;
-    const full = cleanupBase().map((x) => (cleaned.has(x.id) ? { ...x, bytes: Math.round(x.recent_bytes * 0.4), files: x.recent_files, recent_bytes: Math.round(x.recent_bytes * 0.4) } : x));
+    const full = cleanupItems || cleanupBase().map((x) => x.id === 'user_temp'
+      ? { ...x, bytes: 2 * GB, recent_bytes: 2 * GB, recent_files: x.files, newest: Date.now() }
+      : x);
     cleanupItems = full;
     const slow = new Set(['cache:uv', 'cache:gradle']);
     setTimeout(() => {
-      for (const x of full) if (slow.has(x.id) && cleanupId === id) emit('cleanup_item', { scan: id, item: clone(x) });
+      if (cleanupId !== id) return;
+      for (const x of cleanupItems) if (slow.has(x.id)) emit('cleanup_item', { scan: id, item: clone(x) });
     }, 2500);
-    return { id, admin: true, took_ms: 1830, items: full.map((x) => (slow.has(x.id) ? { ...x, bytes: 0, files: 0, recent_bytes: 0, recent_files: 0, newest: 0, pending: true } : clone(x))) };
+    return { id, admin: true, system_drive: 'C:', took_ms: 1830, items: full.map((x) => (slow.has(x.id) ? { ...x, bytes: 0, files: 0, recent_bytes: 0, recent_files: 0, newest: 0, pending: true } : clone(x))) };
   };
-  handlers.cleanup_apply = async ({ id, items, keepRecent }) => {
+  handlers.cleanup_apply = async ({ id, items, keepRecent, parts = {} }) => {
     if (id !== cleanupId || !cleanupItems) throw 'Kết quả quét đã cũ. Hãy quét lại trước khi dọn.';
-    // giả lập `cleanup_progress`: ~6 s, 4 lần/giây, đi qua từng mục theo thứ tự
+    const results = [];
+    const fresh = cleanupItems.filter((x) => items.includes(x.id)).map((x) => {
+      const result = { id: x.id, removed: 0, skipped: 0, kept_recent: 0, bytes: 0, skipped_bytes: 0, skipped_recent_bytes: 0, error: null };
+      results.push(result);
+      // dọn một phần: chỉ các thư mục đã chọn về 0 (giả lập đơn giản, không có tệp bị khoá)
+      const sel = parts[x.id]?.filter((k) => k < x.paths.length);
+      if (sel) {
+        const ps = x.parts.map((p, k) => (sel.includes(k) ? { ...p, bytes: 0, files: 0, recent_bytes: 0, recent_files: 0 } : p));
+        const gone = sel.reduce((n, k) => n + x.parts[k].bytes, 0);
+        Object.assign(result, { removed: sel.reduce((n, k) => n + x.parts[k].files, 0), bytes: gone });
+        return { ...x, parts: ps, bytes: x.bytes - gone, files: ps.reduce((n, p) => n + p.files, 0), recent_bytes: ps.reduce((n, p) => n + p.recent_bytes, 0), recent_files: ps.reduce((n, p) => n + p.recent_files, 0) };
+      }
+      if (x.id === 'recycle') {
+        result.removed = x.files;
+        result.bytes = x.bytes;
+        return { ...x, bytes: 0, files: 0 };
+      }
+      if (x.id === 'windows_update') {
+        result.error = 'Không mở được thư mục.';
+        return x;
+      }
+      const oldFiles = x.files - x.recent_files;
+      const lockedOld = Math.min(oldFiles, 3);
+      const lockedRecent = keepRecent ? 0 : Math.min(x.recent_files, 3);
+      const bytesOld = x.bytes - x.recent_bytes;
+      const lockedOldBytes = lockedOld === oldFiles ? bytesOld : Math.min(bytesOld, 12 * MB);
+      const lockedRecentBytes = lockedRecent ? (lockedRecent === x.recent_files ? x.recent_bytes : Math.min(x.recent_bytes, 12 * MB)) : 0;
+      const recentBytes = keepRecent ? x.recent_bytes : lockedRecentBytes;
+      const recentFiles = keepRecent ? x.recent_files : lockedRecent;
+      const bytes = lockedOldBytes + recentBytes;
+      const files = lockedOld + recentFiles;
+      Object.assign(result, {
+        removed: x.files - files, skipped: lockedOld + lockedRecent, kept_recent: keepRecent ? recentFiles : 0,
+        bytes: x.bytes - bytes, skipped_bytes: lockedOldBytes + lockedRecentBytes, skipped_recent_bytes: lockedRecentBytes,
+      });
+      const ratio = x.bytes ? bytes / x.bytes : 0;
+      const ps = x.parts?.map((p) => ({ ...p, bytes: Math.round(p.bytes * ratio), files: Math.round(p.files * ratio), recent_bytes: Math.round(p.recent_bytes * ratio) }));
+      return { ...x, bytes, files, recent_bytes: recentBytes, recent_files: recentFiles, newest: files ? x.newest : 0, ...(ps ? { parts: ps } : {}) };
+    });
+    // Giả lập tiến độ dựa trên số tệp đã xử lý và số byte thực sự xoá.
     const picked = cleanupItems.filter((x) => items.includes(x.id) && x.id !== 'recycle');
     const totalFiles = picked.reduce((n, x) => n + x.files, 0);
     const totalBytes = picked.reduce((n, x) => n + x.bytes, 0);
+    const freedBytes = results.reduce((n, r) => n + (r.id === 'recycle' ? 0 : r.bytes), 0);
     const steps = 24;
     for (let i = 0; i <= steps && totalFiles; i++) {
       const f = i / steps;
       let acc = 0;
       const cur = picked.find((x) => (acc += x.files) >= f * totalFiles) || picked[picked.length - 1];
-      emit('cleanup_progress', { stage: 'delete', done_files: Math.round(totalFiles * f * 0.98), total_files: totalFiles, freed_bytes: Math.round(totalBytes * f * 0.95), total_bytes: totalBytes, item: cur?.name || '', recycle: items.includes('recycle'), elapsed_ms: i * 250 });
+      emit('cleanup_progress', { stage: 'delete', done_files: Math.round(totalFiles * f), total_files: totalFiles, freed_bytes: Math.round(freedBytes * f), total_bytes: totalBytes, item: cur?.name || '', recycle: items.includes('recycle'), elapsed_ms: i * 250 });
       await sleep(250);
     }
-    emit('cleanup_progress', { stage: 'measure', done_files: totalFiles, total_files: totalFiles, freed_bytes: Math.round(totalBytes * 0.95), total_bytes: totalBytes, item: '', recycle: false, elapsed_ms: steps * 250 });
+    emit('cleanup_progress', { stage: 'measure', done_files: totalFiles, total_files: totalFiles, freed_bytes: freedBytes, total_bytes: totalBytes, item: '', recycle: items.includes('recycle'), elapsed_ms: steps * 250 });
     await sleep(600);
-    const results = items.map((k) => {
-      const x = cleanupItems.find((i) => i.id === k);
-      if (!x) return { id: k, removed: 0, skipped: 0, kept_recent: 0, bytes: 0, error: null };
-      cleaned.add(k);
-      const keep = keepRecent ? x.recent_bytes : 0;
-      const locked = Math.min(x.files, 3 + (x.files % 17));
-      return { id: k, removed: Math.max(0, x.files - locked - (keepRecent ? x.recent_files : 0)), skipped: locked, kept_recent: keepRecent ? x.recent_files : 0, bytes: Math.round((x.bytes - keep) * 0.97), error: k === 'windows_update' ? 'Không mở được thư mục.' : null };
-    });
-    const fresh = cleanupItems
-      .filter((x) => items.includes(x.id))
-      .map((x) => (x.id === 'recycle' ? { ...x, bytes: 0, files: 0 } : { ...x, bytes: keepRecent ? Math.round(x.recent_bytes) : 0, files: keepRecent ? x.recent_files : 0, recent_bytes: keepRecent ? x.recent_bytes : 0 }));
     for (const x of fresh) cleanupItems[cleanupItems.findIndex((i) => i.id === x.id)] = x;
+    // xoá vĩnh viễn thật sự giải phóng chỗ (cả Thùng rác được dọn): ổ hệ thống giả của trang Ổ cứng trống thêm tương ứng
+    duMock.__freeBytes(results.reduce((n, r) => n + (r.bytes || 0), 0));
     return { results, items: clone(fresh), took_ms: 1180 };
   };
   const cleanupReply = () =>

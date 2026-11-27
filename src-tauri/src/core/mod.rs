@@ -20,6 +20,7 @@ pub mod migrate;
 pub mod registry;
 pub mod scan;
 pub mod du;
+pub mod env_vars;
 pub mod services;
 pub mod shell;
 pub mod smbios;

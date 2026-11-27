@@ -47,7 +47,7 @@ class Du {
       this.#listening = api.listen('du', (p) => this.#onProgress(p)).then((u) => (this.#unlisten = u));
     }
     await this.#listening;
-    if (!this.drives.length) this.loadDrives();
+    this.loadDrives(true); // luôn lấy lại (~1 ms): ổ có thể đã đổi từ lần mở trước (xoá / dọn ở trang khác)
     // quay lại trang sau khi đã quét: lấy lại trạng thái từ backend
     if (!this.scan) {
       try {
@@ -57,15 +57,22 @@ class Du {
     }
   }
 
-  async loadDrives() {
+  /** Đọc lại ổ đĩa (rẻ, ~1 ms). `silent`: không báo lỗi bằng toast (gọi nền sau khi xoá / mở trang). */
+  async loadDrives(silent = false) {
     this.drivesLoading = true;
     try {
       this.drives = (await api.duDrives()) || [];
     } catch (e) {
-      toasts.error(t('disk.toast.drives_failed'), [errText(e)]);
+      if (!silent) toasts.error(t('disk.toast.drives_failed'), [errText(e)]);
     } finally {
       this.drivesLoading = false;
     }
+  }
+
+  /** Ổ chứa thư mục gốc đang quét (để hiện dung lượng trống bên cạnh số liệu của cây). */
+  get rootDrive() {
+    const r = (this.root || '').toLowerCase();
+    return this.drives.find((d) => d.ready && d.kind !== 'network' && r.startsWith(d.root.toLowerCase())) || null;
   }
 
   #reset() {
@@ -117,7 +124,9 @@ class Du {
 
   #onProgress(p) {
     if (!p || p.scan !== this.scan) return;
+    const wasDone = !!this.progress?.done;
     this.progress = p;
+    if (p.done && !wasDone) this.loadDrives(true); // quét xong: số ổ trống hiện cạnh số liệu của cây phải mới
     this.refresh();
   }
 
@@ -131,6 +140,9 @@ class Du {
       const ids = only ? [only] : [...this.expanded];
       const res = (await api.duChildren(scan, ids, this.sort.key, this.sort.desc, LIMIT)) || [];
       if (scan !== this.scan) return;
+      // nút đã bị gỡ khỏi cây (xoá / đo lại một phần): backend không trả nữa -> bỏ trạng thái cục bộ của nó
+      const got = new Set(res.map((r) => r.node.id));
+      for (const id of ids) if (id !== 0 && !got.has(id)) this.#drop(id);
       for (const r of res) {
         this.nodes.set(r.node.id, r.node);
         this.paths.set(r.node.id, r.path);
@@ -187,22 +199,100 @@ class Du {
     this.version++;
   }
 
-  /** Sau khi xoá trên đĩa: bỏ khỏi cây (backend trừ số liệu khỏi thư mục cha) rồi làm mới. */
-  async forgetDir(id) {
-    try { await api.duForget(this.scan, id); } catch {}
-    this.expanded.delete(id);
-    this.filesOpen.delete(id);
-    this.nodes.delete(id);
-    this.refresh();
+  /** Số liệu ngoài cây sau một thay đổi trên đĩa: ổ trống (du_drives, ~1 ms) và bộ đếm "N tệp · M thư mục · X" của lần quét. */
+  async #numbers() {
+    this.loadDrives(true);
+    const scan = this.scan;
+    try {
+      const p = await api.duProgress();
+      if (p && p.scan === scan && scan === this.scan) this.progress = p;
+    } catch {}
   }
-  async forgetFile(dirId, file) {
-    try { await api.duForgetFile(this.scan, dirId, file.size, file.alloc); } catch {}
+
+  /** Bỏ trạng thái cục bộ của nút `id` và mọi nhánh dưới nó (đã bị gỡ khỏi cây). */
+  #drop(id) {
+    const stack = [id];
+    while (stack.length) {
+      const c = stack.pop();
+      for (const g of this.kids.get(c)?.ids || []) stack.push(g);
+      this.nodes.delete(c);
+      this.paths.delete(c);
+      this.kids.delete(c);
+      this.expanded.delete(c);
+      this.filesOpen.delete(c);
+      this.files.delete(c);
+    }
+  }
+
+  /** Danh sách tệp đã đọc của `id` và các thư mục dưới nó có thể cũ (nhánh vừa được đo lại): đọc lại khi mở. */
+  #dropFiles(id) {
+    const stack = [id];
+    while (stack.length) {
+      const c = stack.pop();
+      for (const g of this.kids.get(c)?.ids || []) stack.push(g);
+      this.filesOpen.delete(c);
+      this.files.delete(c);
+    }
+  }
+
+  async #dirChanged(id, gone) {
+    if (gone) this.#drop(id);
+    else this.#dropFiles(id); // còn một phần: id các nút còn lại giữ nguyên, nút đã mất sẽ bị bỏ ở lần làm mới
+    this.version++;
+    await this.refresh();
+    this.#numbers();
+  }
+  async #fileGone(dirId, file) {
     const f = this.files.get(dirId);
     if (f) {
       f.items = f.items.filter((x) => x !== file);
       f.total = Math.max(0, f.total - 1);
     }
-    this.refresh();
+    this.version++;
+    await this.refresh();
+    this.#numbers();
+  }
+
+  /** Thay đổi trên đĩa do nơi khác gây ra (trợ lý AI xoá, dọn dẹp…): làm mới cây đang mở (nếu có) và ổ trống, không quét lại. */
+  async changed(paths = []) {
+    if (paths.length) this.#dropFilesAt(paths);
+    if (this.scan) await this.refresh();
+    this.#numbers();
+  }
+
+  /** Bỏ danh sách tệp đã đọc của các thư mục bị ảnh hưởng bởi `paths` (chính nó, bên dưới nó, hoặc thư mục chứa nó). */
+  #dropFilesAt(paths) {
+    const norm = (p) => String(p).replace(/[\\/]+$/, '').toLowerCase();
+    const del = paths.map(norm);
+    const parentOf = (p) => p.slice(0, Math.max(0, p.lastIndexOf('\\')));
+    for (const [id, p0] of [...this.paths]) {
+      const p = norm(p0);
+      if (del.some((d) => p === d || p.startsWith(d + '\\') || p === parentOf(d))) {
+        this.files.delete(id);
+        this.filesOpen.delete(id);
+      }
+    }
+    this.version++;
+  }
+
+  /**
+   * Sau khi backend đã xoá (`du_delete` tự cập nhật cây): chỉ làm mới các nút bị ảnh hưởng, không quét lại.
+   * `gone` = đường dẫn đã mất; còn lại (xoá một phần) thì backend đã đo lại riêng nhánh đó, đồng bộ tại chỗ (id các nút còn lại giữ nguyên).
+   */
+  deletedDir(id, gone) {
+    return this.#dirChanged(id, gone);
+  }
+  deletedFile(dirId, file) {
+    return this.#fileGone(dirId, file);
+  }
+
+  /** Danh sách tệp của thư mục `dirId` có thể đã đổi (thao tác ngoài app): bỏ bản đã đọc, đọc lại khi mở. */
+  async dirContentsChanged(dirId) {
+    this.files.delete(dirId);
+    this.filesOpen.delete(dirId);
+    this.version++;
+    await this.refresh();
+    this.#numbers();
   }
 }
 
