@@ -898,13 +898,13 @@ fn split_command(cmd: &str) -> (String, String) {
 /// Chạy một dòng lệnh như Windows (CreateProcess), trong một job để theo dõi cả tiến trình con.
 /// Bản dev không có quyền Admin mà trình gỡ cần quyền -> hỏi UAC (ShellExecute "runas"), chỉ theo dõi tiến trình đó.
 fn launch(cmd: &str) -> Result<Tracked, String> {
-    use windows::core::{PCWSTR, PWSTR};
+    use windows::core::{Error, PCWSTR, PWSTR};
     use windows::Win32::Foundation::{CloseHandle, ERROR_ELEVATION_REQUIRED};
     use windows::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
         JOB_OBJECT_LIMIT_BREAKAWAY_OK,
     };
-    use windows::Win32::System::Threading::{CreateProcessW, ResumeThread, CREATE_SUSPENDED, PROCESS_INFORMATION, STARTUPINFOW};
+    use windows::Win32::System::Threading::{CreateProcessW, ResumeThread, TerminateProcess, CREATE_SUSPENDED, PROCESS_INFORMATION, STARTUPINFOW};
     let cmd = util::expand_env(cmd.trim());
     if cmd.is_empty() {
         return Err(tr!("apps.err.no_uninstall_cmd"));
@@ -929,7 +929,16 @@ fn launch(cmd: &str) -> Result<Tracked, String> {
             let _ = SetInformationJobObject(j, JobObjectExtendedLimitInformation, &lim as *const _ as *const _, std::mem::size_of_val(&lim) as u32);
             in_job = AssignProcessToJobObject(j, pi.hProcess).is_ok();
         }
-        ResumeThread(pi.hThread);
+        if ResumeThread(pi.hThread) == u32::MAX {
+            let e = Error::from_thread();
+            let _ = TerminateProcess(pi.hProcess, 1);
+            let _ = CloseHandle(pi.hThread);
+            let _ = CloseHandle(pi.hProcess);
+            if let Some(j) = job {
+                let _ = CloseHandle(j);
+            }
+            return Err(tr!("apps.err.resume_installer", e = util::win_err(&e)));
+        }
         let _ = CloseHandle(pi.hThread);
         let job = match (job, in_job) {
             (Some(j), true) => Some(j),

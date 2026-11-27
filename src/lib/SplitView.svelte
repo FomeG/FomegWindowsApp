@@ -2,12 +2,13 @@
   // Bố cục trang "bảng + ngăn chi tiết bên phải" dùng chung (Tiến trình, Khởi động, Dịch vụ).
   // main: nội dung trang (tiêu đề, thanh lọc, bảng). inspector(overlay): ngăn chi tiết.
   // hasTarget: đang có đúng một hàng được chọn (dạng phủ chỉ mở khi có hàng).
+  import { untrack } from 'svelte';
   import { t } from './i18n.svelte.js';
   let { insp, hasTarget = false, cls = '', main, inspector } = $props();
 
   // trang rộng ra -> ngăn nằm cạnh bảng, bỏ dạng phủ; bỏ chọn -> đóng dạng phủ
   $effect(() => {
-    if (insp.shown || !hasTarget) insp.overlay = false;
+    if (insp.shown || !hasTarget) untrack(() => { insp.overlay = false; });
   });
 
   function startResize(e) {

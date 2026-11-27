@@ -9,7 +9,8 @@
 //   options?                    – ô tích thêm: [{ id, label, warn?, init?() }] (vd. "Xoá vĩnh viễn"; init = giá trị đầu)
 //   plainLabel?                 – nhãn hàng là tên thường (mặc định: chữ mono như đường dẫn)
 //   confirmLabel(opts, n)       – chữ nút thực hiện
-//   summary?(chosen)            – chữ ở chân popup
+//   summary?(chosen, opts)      – chữ ở chân popup
+//   view?(row, opts)            – hàng như hiển thị theo giá trị HIỆN TẠI của các ô tuỳ chọn (vd. side / size đổi theo "giữ tệp mới")
 //   doneText                    – nhãn của hàng đã thực hiện xong
 //   async run(chosen, opts)     – thực hiện, trả Map key -> { ok, error }
 //   after?(okRows, failRows, opts) – thông báo / làm mới dữ liệu
@@ -19,7 +20,7 @@ import * as api from './api.js';
 import { du } from './du.svelte.js';
 import { ai } from './ai.svelte.js';
 import { toasts } from './toasts.svelte.js';
-import { fmtBytes, fmtInt, KIND_LABELS, START_LABELS, STATE_LABELS, CRITICAL } from './format.js';
+import { fmtBytes, fmtInt, errText, KIND_LABELS, START_LABELS, STATE_LABELS, CRITICAL } from './format.js';
 import { endBlocked, relayHint, REACH, PORTS_CHANGED } from './ports.js';
 import { cleanup } from './cleanup.svelte.js';
 import { store } from './store.svelte.js';
@@ -27,12 +28,14 @@ import { procs } from './procs.svelte.js';
 import { OP_LABELS } from './aiActions.js';
 import { apps } from './apps.svelte.js';
 import { i18n, t } from './i18n.svelte.js';
+import { env, entryKey } from './env.svelte.js';
 
 // chữ đổi theo ngôn ngữ: title / hint / doneText / emptyText / options là getter (đọc lúc vẽ popup)
 /** tham số số nhiều: count chọn dạng, n là số đã định dạng */
 const cnt = (n, more) => ({ count: n, n: fmtInt(n), ...more });
 
 // ---------------- xoa: xoá thư mục / tệp ----------------
+let inexactDeleted = []; // đường dẫn của lần xoá gần nhất mà số liệu cây quét có thể chưa chính xác
 const del = {
   get title() { return t('ai.review.del.title'); },
   get hint() { return t('ai.review.del.hint'); },
@@ -62,10 +65,13 @@ const del = {
   },
   async run(chosen, o) {
     const res = await api.duDeletePaths(chosen.map((r) => r.label), !!o.permanent);
+    inexactDeleted = res.filter((x) => x.inexact).map((x) => x.path);
     return new Map(res.map((x) => [x.path.toLowerCase(), { ok: x.ok, error: x.error || t('ai.review.del.failed') }]));
   },
   after(ok, fail, o) {
-    if (du.scan) du.refresh();
+    // backend đã cập nhật cây quét (kể cả xoá một phần): đọc lại cây đang mở + ổ trống, bỏ danh sách tệp cũ của các thư mục bị ảnh hưởng
+    du.changed([...ok, ...fail].map((r) => r.label));
+    if (inexactDeleted.length) toasts.warn(t('disk.toast.inexact'), [...inexactDeleted.slice(0, 3), t('disk.toast.inexact_detail')]);
     if (ok.length) {
       ai.diskChanged();
       const freed = ok.reduce((a, r) => a + (r.size || 0), 0);
@@ -102,6 +108,7 @@ const ports = {
         blocked,
         checked: !blocked,
         pids: [...new Set(uses.map((u) => u.pid))],
+        owners: new Map(uses.map((u) => [u.pid, (u.name || '').toLowerCase()])),
         side: reach ? REACH[reach][0] : '',
       };
     });
@@ -109,13 +116,18 @@ const ports = {
   confirmLabel: (o, n) => (n ? t('ai.review.ports.confirm_n', cnt(n)) : t('ai.review.ports.confirm')),
   summary: (chosen) => t('ai.review.ports.summary', cnt(chosen.length, { procs: fmtInt(new Set(chosen.flatMap((r) => r.pids)).size) })),
   async run(chosen) {
-    const pids = [...new Set(chosen.flatMap((r) => r.pids))];
-    const res = (await api.procKill(pids, false)) || [];
+    const fresh = (await api.portsList(true))?.uses || [];
+    const matching = new Map(chosen.map((r) => [r.key, new Set(r.pids.filter((pid) =>
+      fresh.some((u) => u.port === Number(r.key) && u.pid === pid && u.name && u.name.toLowerCase() === r.owners.get(pid))
+    ))]));
+    const pids = [...new Set(chosen.flatMap((r) => [...matching.get(r.key)]))];
+    const res = pids.length ? (await api.procKill(pids, false)) || [] : [];
     const byPid = new Map(res.map((x) => [x.pid, x]));
     const out = new Map();
     for (const r of chosen) {
-      const bad = r.pids.map((p) => byPid.get(p)).find((x) => !x?.ok);
-      out.set(r.key, bad ? { ok: false, error: `PID ${bad?.pid ?? '?'}: ${bad?.error || t('ai.review.ports.no_response')}` } : { ok: true });
+      const bad = r.pids.find((pid) => !matching.get(r.key).has(pid) || !byPid.get(pid)?.ok);
+      const error = matching.get(r.key).has(bad) ? byPid.get(bad)?.error || t('ai.review.ports.no_response') : t('ai.review.kill.not_found');
+      out.set(r.key, bad == null ? { ok: true } : { ok: false, error: `PID ${bad}: ${error}` });
     }
     return out;
   },
@@ -127,6 +139,8 @@ const ports = {
 };
 
 // ---------------- don_dep: dọn mục của trang Dọn dẹp ----------------
+// Dung lượng dọn được theo ô "giữ tệp mới" của popup (không theo cài đặt chung), cùng công thức với trang Dọn dẹp.
+const freeableFor = (it, keep) => cleanup.freeable(it, keep);
 const clean = {
   get title() { return t('ai.review.clean.title'); },
   plainLabel: true, // nhãn là tên mục, không phải đường dẫn
@@ -144,21 +158,38 @@ const clean = {
         label: it?.name ?? x.label,
         reason: x.reason,
         icon: it?.group === 'cache' ? 'folder' : 'delete',
+        // icon thật của ứng dụng (đã tải khi quét)
+        exe: it?.icon || undefined,
         blocked,
         checked: !blocked,
-        size: it?.bytes ?? 0,
-        side: !it ? '' : it.pending ? t('ai.review.measuring') : t('ai.review.size_files', cnt(it.files, { size: fmtBytes(it.bytes) })),
+        // dung lượng thật sự dọn được (trừ tệp mới khi "giữ tệp mới", tệp khoá lần trước): cùng số với trang Dọn dẹp
+        it,
+        size: it ? freeableFor(it, cleanup.keepRecent) : 0,
+        side: !it ? '' : it.pending ? t('ai.review.measuring') : t('ai.review.size_files', cnt(it.files, { size: fmtBytes(freeableFor(it, cleanup.keepRecent)) })),
       };
     });
   },
   confirmLabel: (o, n) => t('ai.review.clean.confirm') + (n ? ` (${fmtInt(n)})` : ''),
-  summary: (chosen) => t('ai.review.summary_items', cnt(chosen.length, { size: fmtBytes(chosen.reduce((a, r) => a + (r.size || 0), 0)) })),
+  // kích thước hiện theo ô "giữ tệp mới" của popup NGAY (không đóng băng lúc mở popup)
+  view(r, o) {
+    if (!r.it || r.it.pending || r.blocked) return r;
+    const size = freeableFor(r.it, !!o.keepRecent);
+    return { ...r, size, side: t('ai.review.size_files', cnt(r.it.files, { size: fmtBytes(size) })) };
+  },
+  summary(chosen, o) {
+    const size = chosen.reduce((a, r) => a + (clean.view(r, o).size || 0), 0);
+    return t('ai.review.summary_items', cnt(chosen.length, { size: fmtBytes(size) }));
+  },
   async run(chosen, o) {
-    const res = await cleanup.clean(chosen.map((r) => r.key), !!o.keepRecent);
+    // đề xuất của trợ lý = dọn CẢ mục như popup hiện, không theo lựa chọn một phần đang có ở trang
+    const res = await cleanup.clean(chosen.map((r) => r.key), !!o.keepRecent, {});
     return new Map(chosen.map((r) => {
       const x = res.get(r.key);
       return [r.key, x ? { ok: !x.error, error: x.error } : { ok: false, error: t('ai.review.no_result') }];
     }));
+  },
+  after() {
+    du.changed(); // ổ trống (và cây Ổ cứng đang mở) đổi sau khi dọn
   },
 };
 
@@ -222,6 +253,90 @@ const startup = {
   after(ok, fail) {
     if (ok.length) toasts.success(t('ai.review.startup.ok', cnt(ok.length)), ok.slice(0, 5).map((r) => r.label));
     if (fail.length) toasts.error(t('ai.review.startup.fail', cnt(fail.length)), fail.slice(0, 5).map((r) => `${r.label}: ${r.error}`));
+  },
+};
+
+// ---------------- bien_moi_truong: sửa biến môi trường ----------------
+// Mỗi hàng là một thao tác; khi thực hiện, các thao tác đã tích của CÙNG một biến được gộp và ghi một lần
+// (giá trị đọc lại ngay trước khi ghi, nên sửa tay ở trang trong lúc popup mở vẫn được giữ).
+const envMatch = (v, value) => {
+  const k = entryKey(value);
+  return v.entries.findIndex((e) => e.raw.toLowerCase() === value.toLowerCase() || entryKey(e.expanded) === k || entryKey(e.raw) === k);
+};
+const envVars = {
+  get title() { return t('ai.review.env.title'); },
+  plainLabel: true,
+  get hint() { return t('ai.review.env.hint'); },
+  get doneText() { return t('ai.review.env.done'); },
+  async load(items) {
+    await env.load();
+    return items.map((x) => {
+      const v = env.find(x.scope, x.name);
+      let blocked = '';
+      let sub = '';
+      if (x.scope === 'system' && !env.canSystem) blocked = t('env.need_admin');
+      else if (x.op === 'del') blocked = !v ? t('ai.review.env.not_found') : v.protected ? t('env.protected_tip') : '';
+      else if (x.op === 'remove') {
+        const i = v ? envMatch(v, x.value) : -1;
+        if (!v) blocked = t('ai.review.env.not_found');
+        else if (i < 0) blocked = t('ai.review.env.no_entry');
+        else {
+          const e = v.entries[i];
+          sub = e.dup ? t('env.entry.dup') : e.other ? t('env.entry.other') : e.exists === false ? t('env.entry.missing') : e.exists ? t('env.entry.ok') : '';
+        }
+      } else if (x.op === 'add') {
+        if (v && !v.list && v.value.trim()) blocked = t('ai.review.env.not_list');
+        else if (v && envMatch(v, x.value) >= 0) blocked = t('ai.review.env.already');
+      } else if (x.op === 'set') {
+        if (v && v.value === x.value) blocked = t('ai.review.env.already');
+        else if (v?.secret) sub = t('ai.review.env.secret_set');
+        else if (v) sub = t('ai.review.env.was', { value: v.value.length > 80 ? `${v.value.slice(0, 80)}…` : v.value || '–' });
+      }
+      if (!blocked && x.op === 'set' && x.name.toLowerCase() === 'path') sub = t('ai.review.env.path_set');
+      return { key: x.key, label: x.label, reason: x.reason, sub, icon: x.op === 'del' ? 'delete' : 'bullets', blocked, checked: !blocked, side: t(`env.scope.${x.scope}`), x };
+    });
+  },
+  confirmLabel: (o, n) => t('ai.review.env.confirm') + (n ? ` (${fmtInt(n)})` : ''),
+  summary: (chosen) => t('ai.review.summary_n', cnt(chosen.length)),
+  async run(chosen) {
+    await env.load();
+    const groups = new Map();
+    for (const r of chosen) {
+      const id = `${r.x.scope}:${r.x.name.toLowerCase()}`;
+      if (!groups.has(id)) groups.set(id, []);
+      groups.get(id).push(r);
+    }
+    const out = new Map();
+    for (const rows of groups.values()) {
+      const { scope, name } = rows[0].x;
+      const v = env.find(scope, name);
+      let entries = v ? (v.list ? v.entries.map((e) => e.raw) : v.value ? [v.value] : []) : [];
+      let value = v ? v.value : null;
+      let listy = !v || v.list;
+      for (const { x } of rows) {
+        if (x.op === 'del') { value = null; listy = false; }
+        else if (x.op === 'set') { value = x.value; listy = false; }
+        else if (x.op === 'add') { entries = [...entries, x.value]; listy = true; }
+        else if (x.op === 'remove') {
+          const k = entryKey(x.value);
+          const exp = new Map((v?.entries || []).map((e) => [e.raw, e.expanded]));
+          entries = entries.filter((raw) => raw.toLowerCase() !== x.value.toLowerCase() && entryKey(raw) !== k && entryKey(exp.get(raw) || '') !== k);
+          listy = true;
+        }
+      }
+      const final = listy && !rows.some((r) => r.x.op === 'set' || r.x.op === 'del') ? entries.join(';') : value;
+      try {
+        await env.set(scope, v?.name || name, final, { quiet: true });
+        for (const r of rows) out.set(r.key, { ok: true });
+      } catch (e) {
+        for (const r of rows) out.set(r.key, { ok: false, error: errText(e) });
+      }
+    }
+    return out;
+  },
+  after(ok, fail) {
+    if (ok.length) toasts.success(t('ai.review.env.ok', cnt(ok.length)), [...ok.slice(0, 5).map((r) => r.label), t('env.toast.restart_hint')]);
+    if (fail.length) toasts.error(t('ai.review.env.fail', cnt(fail.length)), fail.slice(0, 5).map((r) => `${r.label}: ${r.error}`));
   },
 };
 
@@ -331,6 +446,7 @@ const kill = {
         blocked,
         checked: !blocked,
         pids: live.map((p) => p.pid),
+        lookupTargets: [...new Set(live.map((p) => p.target))],
         mem,
         side: !g.procs.length
           ? ''
@@ -357,13 +473,20 @@ const kill = {
       mem: fmtBytes(chosen.reduce((a, r) => a + r.mem, 0)),
     })),
   async run(chosen, o) {
-    const res = (await api.procKill([...new Set(chosen.flatMap((r) => r.pids))], !!o.tree)) || [];
+    const fresh = (await api.procLookup([...new Set(chosen.flatMap((r) => r.lookupTargets))])) || [];
+    const names = new Map(fresh.filter((p) => p.name && !p.blocked).map((p) => [p.pid, p.name.toLowerCase()]));
+    const same = (r, pid) => names.get(pid) === r.label.toLowerCase();
+    const pids = [...new Set(chosen.flatMap((r) => r.pids.filter((pid) => same(r, pid))))];
+    const res = pids.length ? (await api.procKill(pids, !!o.tree)) || [] : [];
     const by = new Map(res.map((x) => [x.pid, x]));
     return new Map(chosen.map((r) => {
       // tiến trình con có thể đã thoát cùng tiến trình cha -> "không tìm thấy" không tính là lỗi
       // (so với lỗi của backend, tiếng Việt hoặc tiếng Anh)
+      const gone = r.pids.filter((pid) => !same(r, pid)).length;
       const bad = r.pids.map((pid) => by.get(pid)).filter((x) => x && !x.ok && !/không tìm thấy|đã thoát|không còn|not found|exited|no longer/i.test(x.error || '')); // i18n-ignore: đọc chữ của model / backend
-      return [r.key, bad.length ? { ok: false, error: t('ai.review.kill.partial', cnt(r.pids.length, { bad: fmtInt(bad.length), error: bad[0].error })) } : { ok: true }];
+      const failed = gone + bad.length;
+      const error = gone ? t('ai.review.kill.not_found') : bad[0]?.error;
+      return [r.key, failed ? { ok: false, error: t('ai.review.kill.partial', cnt(r.pids.length, { bad: fmtInt(failed), error })) } : { ok: true }];
     }));
   },
   after(ok, fail) {
@@ -411,4 +534,4 @@ const uninstall = {
   },
 };
 
-export const REVIEW_KINDS = { go_cai: uninstall, xoa: del, dong_cong: ports, don_dep: clean, tat_khoi_dong: startup, dich_vu: services, ket_thuc: kill };
+export const REVIEW_KINDS = { go_cai: uninstall, xoa: del, dong_cong: ports, don_dep: clean, tat_khoi_dong: startup, dich_vu: services, ket_thuc: kill, bien_moi_truong: envVars };

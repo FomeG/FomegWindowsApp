@@ -72,6 +72,27 @@ export const ACTION_KINDS = {
       return exe ? { key: exe[1].toLowerCase(), label: exe[1], target: exe[1] } : null;
     },
   },
+  // Sửa biến môi trường (trang Biến môi trường). Đích: `user|system TÊN -= mục | += mục | = giá trị | xoa`.
+  bien_moi_truong: {
+    title: (n) => t('ai.act.bien_moi_truong.title', { count: n, n: fmtInt(n) }),
+    get button() { return t('ai.act.bien_moi_truong.button'); },
+    parse: (x) => {
+      const s = x.replace(/^`+|`+$/g, '').trim();
+      const SC = '(user|system|nguoi_dung|he_thong|người dùng|hệ thống)'; // i18n-ignore: đọc chữ của model
+      const del = s.match(new RegExp(`^${SC}\\s+(\\S+)\\s*:?\\s+(xoa|xoá|xóa|delete|remove)$`, 'i')); // i18n-ignore: đọc chữ của model
+      const m = del ? null : s.match(new RegExp(`^${SC}\\s+([^\\s=+]+?)\\s*(\\+=|-=|=)\\s*(.*)$`, 'i'));
+      const r = del || m;
+      if (!r) return null;
+      const scope = /^(user|nguoi_dung|người dùng)$/i.test(r[1]) ? 'user' : 'system'; // i18n-ignore
+      const name = r[2];
+      const op = del ? 'del' : { '+=': 'add', '-=': 'remove', '=': 'set' }[m[3]];
+      const value = del ? '' : m[4].trim().replace(/^"(.*)"$/, '$1');
+      if ((op === 'add' || op === 'remove') && (!value || value.includes(';'))) return null;
+      if (/[=]/.test(name)) return null;
+      const label = t(`ai.act.env.${op}`, { name, value, scope: t(`env.scope.${scope}`) });
+      return { key: `${scope}:${name.toLowerCase()}:${op}:${value.toLowerCase()}`, label, scope, name, op, value };
+    },
+  },
 };
 
 // thao tác dịch vụ: chữ trợ lý viết (không dấu / có dấu / tiếng Anh) -> mã

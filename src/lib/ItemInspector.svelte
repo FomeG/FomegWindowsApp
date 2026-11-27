@@ -5,10 +5,11 @@
   //
   // Chỉ hiện RAM (không CPU / GPU / đĩa): mục khởi động và dịch vụ không phải lúc nào cũng chạy, và app chỉ
   // theo dõi RAM cho chúng (state.rs::matcher). Muốn xem đủ số liệu -> "Xem trong Tiến trình".
-  // Biểu đồ RAM chỉ lấy mẫu khi đang xem một mục (1 lần/giây, tối đa 120 điểm, dừng khi cửa sổ ẩn).
+  // Biểu đồ RAM chỉ lấy mẫu khi đang xem một mục (1 lần/giây, tối đa 120 điểm, dừng khi cửa sổ ẩn hoặc tạm dừng cập nhật).
   import { untrack } from 'svelte';
   import { store } from './store.svelte.js';
   import { procs } from './procs.svelte.js';
+  import { prefs } from './prefs.svelte.js';
   import { ai } from './ai.svelte.js';
   import { C } from './colors.js';
   import { KIND_LABELS, KIND_ORDER, START_LABELS, STATE_LABELS, SCOPE_LABELS, CRITICAL, scopeOf, fmtMB, fmtBytes, fmtInt, copyText } from './format.js';
@@ -51,24 +52,31 @@
   const ht = [];
   const hm = [];
   let hv = $state(0);
-  // chỉ phụ thuộc id (mục được thay bằng đối tượng mới khi bật/tắt -> không làm mất biểu đồ)
   const itemId = $derived(item?.id ?? null);
+  let hidden = $state(document.hidden);
+  const sampling = $derived(!hidden && prefs.interval > 0);
+  function sample(id) {
+    if (document.hidden || !(prefs.interval > 0)) return;
+    ht.push(Date.now());
+    hm.push((store.ram.get(id) ?? 0) * 1048576);
+    if (ht.length > N) { ht.shift(); hm.shift(); }
+    hv++;
+  }
+
+  // Chỉ làm rỗng biểu đồ khi đổi id, giữ lịch sử khi tạm dừng lấy mẫu.
   $effect(() => {
     const id = itemId;
-    // lấy mẫu không được theo dõi hv / store.ram, nếu không effect tự kích hoạt lại vô hạn
-    const sample = () => untrack(() => {
-      if (document.hidden) return;
-      ht.push(Date.now());
-      hm.push((store.ram.get(id) ?? 0) * 1048576);
-      if (ht.length > N) { ht.shift(); hm.shift(); }
+    untrack(() => {
+      ht.length = 0;
+      hm.length = 0;
       hv++;
+      if (id) sample(id);
     });
-    ht.length = 0;
-    hm.length = 0;
-    untrack(() => hv++);
-    if (!id) return;
-    sample();
-    const timer = setInterval(sample, 1000);
+  });
+  $effect(() => {
+    const id = itemId;
+    if (!id || !sampling) return;
+    const timer = setInterval(() => sample(id), 1000);
     return () => clearInterval(timer);
   });
 
@@ -160,6 +168,8 @@
   );
   const barMax = $derived(Math.max(1, ...bars.map((b) => b[1])));
 </script>
+
+<svelte:document onvisibilitychange={() => (hidden = document.hidden)} />
 
 {#if item}
   <InspectorShell

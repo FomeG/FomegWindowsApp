@@ -155,7 +155,7 @@
               <span class="muted small ellipsis" title={r.reason}>{r.reason}</span>
             {/if}
           </span>
-          <span class="del-size small">{#if loading}<span class="spin xs"></span>{:else}{r.side}{/if}</span>
+          <span class="del-size small">{#if loading}<span class="spin xs"></span>{:else}{(K.view ? K.view(r, opts) : r).side}{/if}</span>
           {#if r.details?.length > 1}
             <button type="button" class="icon-btn xs del-exp" aria-expanded={open} title={open ? t('ai.review.collapse') : t('ai.review.expand_procs', { count: r.details.length, n: fmtInt(r.details.length) })} aria-label={open ? t('ai.review.collapse') : t('ai.review.expand')}
               onclick={(e) => { e.preventDefault(); const n = new Set(expanded); open ? n.delete(r.key) : n.add(r.key); expanded = n; }}>
@@ -182,7 +182,7 @@
     {/each}
 
     <div class="modal-actions">
-      <span class="grow muted small">{#if chosen.length && K.summary}{K.summary(chosen)}{/if}</span>
+      <span class="grow muted small">{#if chosen.length && K.summary}{K.summary(chosen, opts)}{/if}</span>
       <button type="button" class="btn danger solid" disabled={(!chosen.length && !K.allowEmpty) || busy || loading} onclick={confirm}>
         {#if busy}<span class="spin sm" aria-hidden="true"></span>{/if}
         {K.confirmLabel(opts, chosen.length)}

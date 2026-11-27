@@ -23,6 +23,8 @@ use super::{ports, scan, Item, ScanResult};
 
 /// Trần độ dài một kết quả (ký tự).
 pub const MAX_OUT: usize = 6000;
+/// Tool trả kết quả đầy đủ, không cắt ở MAX_OUT.
+const UNCAPPED: &[&str] = &["environment_variables"];
 const FRESH: Duration = Duration::from_secs(2);
 const WINDOW: Duration = Duration::from_millis(500);
 const SCAN_FRESH: Duration = Duration::from_secs(60);
@@ -61,6 +63,7 @@ pub fn label(name: &str) -> &'static str {
         "installed_apps" => "ứng dụng đã cài",
         "app_folders" => "thư mục của ứng dụng",
         "leftovers" => "phần còn sót sau khi gỡ",
+        "environment_variables" => "biến môi trường",
         _ => "dữ liệu máy",
     }
 }
@@ -166,6 +169,7 @@ impl<'a> Toolbox<'a> {
             })),
             tool("app_folders", "Folders that belong to ONE installed app (install folder + data folders in AppData, ProgramData, Program Files, profile dot-folders found by the app's name / exe / publisher), measured, with folders also used by another installed app marked shared. Use it before advising to uninstall, or to say what stays after uninstalling.", json!({ "type": "object", "properties": { "name": { "type": "string", "description": "Part of the app name as listed by installed_apps" } }, "required": ["name"] })),
             tool("leftovers", "What uninstalled apps left behind: folders of apps that were removed (the app remembers apps it saw before), data of Store apps that are no longer installed, and WindowsApps folders no longer used by this account (packages of other accounts, old versions, orphans – those are only reported). Measured sizes. Folders can be proposed for deletion in an `xoa` block. Takes up to ~15 s.", none()),
+            tool("environment_variables", "Windows environment variables of the user and of the system, read from the registry like the Environment Variables dialog: raw value (with %VAR% unexpanded) and its expansion, REG_EXPAND_SZ, list variables (Path, PSModulePath, PATHEXT…) split into entries marked missing folder / duplicate / already in the system variable, effective PATH length. Values of variables whose name looks secret (KEY, TOKEN, PASSWORD…) are hidden – never ask for them. Changes are proposed in a `bien_moi_truong` block, never made by you.", json!({ "type": "object", "properties": { "name": { "type": "string", "description": "Only variables whose name contains this (e.g. path)" } } })),
             tool("app_info", "This app: version, running as administrator or not, update interval.", none()),
         ]
     }
@@ -215,10 +219,12 @@ impl<'a> Toolbox<'a> {
                 Ok(s)
             }
             "leftovers" => Ok(crate::core::leftovers::ai_report(&crate::core::leftovers::scan())),
+            "environment_variables" => Ok(crate::core::env_vars::ai_report(arg_str(args, "name"))),
             "app_info" => Ok(self.app.map(|a| a.app_info()).unwrap_or_else(|| format!("Vietnamese's Ultimate W App {} (MCP, app chưa mở) · Admin: {}", env!("CARGO_PKG_VERSION"), yes(crate::is_elevated())))),
             _ => Err(format!("Không có tool `{name}`.")),
         }?;
-        Ok(cap(out))
+        // biến môi trường gửi ĐỦ (Path người dùng phải so với Path hệ thống; bị cắt là model đề xuất sai)
+        Ok(if UNCAPPED.contains(&name) { out } else { cap(out) })
     }
 
     // ---------------- lấy mẫu ----------------
@@ -949,12 +955,13 @@ mod tests {
             ("scan_folder", json!({ "path": env!("CARGO_MANIFEST_DIR"), "depth": 2 })),
             ("installed_apps", json!({ "limit": 5 })),
             ("app_folders", json!({ "name": "a" })),
+            ("environment_variables", json!({})),
             ("app_info", json!({})),
         ] {
             let t0 = Instant::now();
             let out = t.run(name, &args).unwrap_or_else(|e| panic!("{name}: {e}"));
             println!("== {name} ({} ms, {} ký tự)\n{}", t0.elapsed().as_millis(), out.len(), out.lines().take(6).collect::<Vec<_>>().join("\n"));
-            assert!(out.len() <= MAX_OUT + 80);
+            assert!(out.len() <= MAX_OUT + 80 || UNCAPPED.contains(&name));
         }
         assert!(t.run("nope", &json!({})).is_err());
         assert!(t.run("process_report", &json!({})).is_err());

@@ -11,9 +11,12 @@
   import ProcessesPage from './lib/ProcessesPage.svelte';
   import PerformancePage from './lib/PerformancePage.svelte';
   import SettingsPage from './lib/SettingsPage.svelte';
+  import ChangesPage from './lib/ChangesPage.svelte';
   import DiskPage from './lib/DiskPage.svelte';
   import CleanupPage from './lib/CleanupPage.svelte';
   import AppsPage from './lib/AppsPage.svelte';
+  import EnvPage from './lib/EnvPage.svelte';
+  import { env } from './lib/env.svelte.js';
   import { apps } from './lib/apps.svelte.js';
   import AiPanel from './lib/AiPanel.svelte';
   import StatusBar from './lib/StatusBar.svelte';
@@ -46,6 +49,7 @@
       e.preventDefault();
       if (store.page === 'startup' || store.page === 'services' || store.page === 'dashboard') store.scan();
       else if (store.page === 'apps') apps.load({ force: true });
+      else if (store.page === 'env') env.load();
     }
   }
 
@@ -84,6 +88,10 @@
         <DiskPage />
       {:else if store.page === 'cleanup'}
         <CleanupPage />
+      {:else if store.page === 'env'}
+        <EnvPage />
+      {:else if store.page === 'changes'}
+        <ChangesPage />
       {:else}
         <SettingsPage />
       {/if}

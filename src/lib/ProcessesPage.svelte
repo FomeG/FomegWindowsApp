@@ -424,6 +424,7 @@
   async function killRows(tg, tree) {
     const pids = [...new Set(tg.flatMap(pidsOf))];
     if (!pids.length) return;
+    const snapshot = procs.snapshot(pids);
     const label = tg.length === 1 ? nameOf(tg[0]) : t('procs.kill.n_items', { n: tg.length });
     const sysProc = tg.some((r) => (r.p?.kind || r.kind) === 'windows' && !procs.windows.has(r.pid));
     if (!loadPref('proc:noAskKill', false)) {
@@ -434,10 +435,15 @@
       if (r.checked) savePref('proc:noAskKill', true);
     }
     try {
-      const res = (await api.procKill(pids, tree)) || [];
+      const { same, gone } = procs.stillSame(snapshot);
+      const res = same.length ? (await api.procKill(same, tree)) || [] : [];
+      for (const pid of gone) res.push({ pid, ok: false, error: t('ai.review.kill.not_found') });
       const okPids = res.filter((x) => x.ok).map((x) => x.pid);
-      procs.dropLocal(okPids);
-      const errors = res.filter((x) => !x.ok).map((x) => `PID ${x.pid}${procs.map.get(x.pid) ? ' (' + procs.map.get(x.pid).name + ')' : ''}: ${x.error || t('procs.err.generic')}`);
+      procs.dropLocal(okPids.filter((pid) => procs.map.get(pid) === snapshot.get(pid)));
+      const errors = res.filter((x) => !x.ok).map((x) => {
+        const name = snapshot.get(x.pid)?.name;
+        return `PID ${x.pid}${name ? ' (' + name + ')' : ''}: ${x.error || t('procs.err.generic')}`;
+      });
       if (res.length === 1 && !errors.length) toasts.success(t('procs.toast.killed', { name: label }));
       else if (res.length === 1) toasts.error(t('procs.toast.kill_fail', { name: label }), errors);
       else summarize(t('procs.kill.verb'), t('procs.unit'), okPids.length, errors);

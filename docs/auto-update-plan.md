@@ -96,14 +96,15 @@ Build trên máy giữ nguyên (exe portable, `bundle.active: false`). CI thêm 
 
 ```powershell
 git switch dev
-npm run bump patch            # 0.3.0 -> 0.3.1 (hoặc: npm run bump 0.4.0)
-git commit -am "chore: phát hành v0.3.1"
+npm run bump patch            # 0.3.0 -> 0.3.1 (hoặc: npm run bump 0.4.0); [Unreleased] của 2 changelog -> [0.3.1]
+# kiểm tra / viết mục [0.3.1] trong CHANGELOG.vi.md + CHANGELOG.md (skill /changelog), xem trước: npm run notes
+git commit -am "chore: release v0.3.1"
 git push
 # mở PR dev -> main, chờ CI xanh, merge
 ```
-CI build khoảng 10–20 phút rồi tạo Release `v0.3.1` (ghi chú = các commit từ bản trước, bỏ `chore:`/`ci:`/`docs:`). Người dùng thấy thông báo ở lần kiểm tra tiếp theo (lúc mở app, hoặc trong vòng 6 giờ).
+CI build rồi tạo Release `v0.3.1`. Người dùng thấy thông báo ở lần kiểm tra tiếp theo (lúc mở app, hoặc trong vòng 6 giờ).
 
-Viết commit theo kiểu `feat: …`, `fix: …` (tiếng Việt cũng được) để ghi chú phát hành dễ đọc.
+**Có gì mới / changelog** (Keep a Changelog, hai tệp cùng cấu trúc): `CHANGELOG.vi.md` (Thêm mới / Thay đổi / Sửa lỗi…) và `CHANGELOG.md` (Added / Changed / Fixed…). Mỗi thay đổi người dùng thấy được ghi ngay vào `## [Unreleased]` của cả hai tệp; `npm run bump` đổi thành version. `scripts/release-notes.mjs` ghép nội dung Release: tiếng Việt ở trên, tiếng Anh ở dưới (dấu `<!-- vi -->` / `<!-- en -->` / `<!-- end -->`, GitHub không hiện), rồi phần Cài đặt; `release.yml` tải thêm `<setup>.exe.sha256` và điền dòng SHA-256. Mục trống thì nhóm các commit `feat:` / `perf:` / `fix:` kể từ tag trước. Trong app: thanh cập nhật chỉ hiện phần đúng ngôn ngữ; trang **Có gì mới** (nút cuối thanh bên) đọc tệp của ngôn ngữ đang chọn (nhúng lúc build); lần mở đầu tiên sau khi cập nhật có toast "Đã cập nhật lên vX" với 3 dòng đầu.
 
 ## 7. Hạn chế đã biết
 

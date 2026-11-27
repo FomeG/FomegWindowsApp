@@ -131,8 +131,53 @@ export function createDuMock(emit) {
     ].join('\n');
   }
 
-  return {
+  /** Nút hoặc một tổ tiên của nó đã bị gỡ: con của thư mục đã xoá cũng không còn truy cập được. */
+  const detached = (s, n) => {
+    for (let x = n; x; x = x.parent == null ? null : s.nodes[x.parent]) if (x.removed) return true;
+    return false;
+  };
+  /** Gỡ nút khỏi cây giả lập, trừ số liệu khỏi mọi thư mục cha (như Scan::forget). */
+  function forgetNode(n) {
+    if (!n || n.parent == null || n.removed) return;
+    n.removed = true;
+    for (let p = cur.nodes[n.parent]; p; p = p.parent == null ? null : cur.nodes[p.parent]) { p.size -= n.size; p.alloc -= n.alloc; p.files -= n.files; }
+  }
+  /** Giống du_delete thật: cây quét được cập nhật ngay ở backend (nút đã gỡ, hoặc tệp trừ đúng size / alloc) và ổ trống thêm khi xoá vĩnh viễn. */
+  async function applyDelete(path, permanent) {
+    const s = cur;
+    let freed = 0;
+    const norm = (x) => x.replace(/\\+$/, '').toLowerCase();
+    const node = s?.nodes.find((x) => !detached(s, x) && norm(pathOf(s, x)) === norm(path));
+    if (node) {
+      freed = node.size;
+      forgetNode(node);
+    } else if (s) {
+      const cut = path.lastIndexOf('\\');
+      const dir = s.nodes.find((x) => !detached(s, x) && norm(pathOf(s, x)) === norm(path.slice(0, cut)));
+      if (dir) {
+        gen(s, dir);
+        const f = (await mock.du_files({ path: pathOf(s, dir), limit: 99999 })).items.find((x) => x.name.toLowerCase() === path.slice(cut + 1).toLowerCase());
+        if (f) {
+          freed = f.size;
+          (dir.gone ??= new Map()).set(f.name.toLowerCase(), f.size); // du_files không được liệt kê lại tệp này
+          dir.own_files = Math.max(0, dir.own_files - 1);
+          dir.own_size = Math.max(0, dir.own_size - f.size);
+          for (let p = dir; p; p = p.parent == null ? null : s.nodes[p.parent]) { p.size -= f.size; p.alloc -= f.alloc; p.files -= 1; }
+        }
+      }
+    }
+    // Thùng rác nằm cùng ổ: chỉ xoá vĩnh viễn mới làm ổ trống thêm
+    const d = DRIVES.find((x) => path.toUpperCase().startsWith(x.letter));
+    if (d && permanent && freed) d.free = Math.min(d.total, d.free + freed);
+  }
+
+  const mock = {
     __aiReply: aiReply,
+    /** Dọn dẹp giả lập giải phóng `bytes` trên ổ hệ thống (C:) -> số ổ trống của trang Ổ cứng tăng theo. */
+    __freeBytes(bytes) {
+      const d = DRIVES[0];
+      if (d && bytes > 0) d.free = Math.min(d.total, d.free + bytes);
+    },
     async du_drives() { await sleep(30); return structuredClone(DRIVES); },
     async du_start({ root }) {
       await sleep(40);
@@ -161,7 +206,7 @@ export function createDuMock(emit) {
       await sleep(8);
       if (!cur || cur.id !== scan) throw 'Lần quét này đã kết thúc hoặc đã được thay bằng lần quét khác.';
       const s = cur;
-      return ids.filter((id) => s.nodes[id] && !s.nodes[id].removed).map((id) => {
+      return ids.filter((id) => s.nodes[id] && !detached(s, s.nodes[id])).map((id) => {
         const n = s.nodes[id];
         const node = out(s, n);
         const kids = node.kids ? n.kids.filter((c) => !s.nodes[c].removed).map((c) => out(s, s.nodes[c])) : [];
@@ -173,38 +218,30 @@ export function createDuMock(emit) {
     async du_files({ path, limit }) {
       await sleep(60);
       const s = cur;
-      const n = s?.nodes.find((x) => pathOf(s, x) === path);
-      const count = n ? n.own_files : 5;
-      const total = n ? n.own_size : 10 * MB;
+      const n = s?.nodes.find((x) => pathOf(s, x) === path && !detached(s, x));
+      // tệp đã xoá vẫn nằm trong dãy sinh theo hạt giống: sinh đủ số cũ rồi lọc đúng những tệp đó ra
+      const gone = n?.gone;
+      const count = n ? n.own_files + (gone?.size || 0) : 5;
+      const total = n ? n.own_size + [...(gone?.values() || [])].reduce((a, b) => a + b, 0) : 10 * MB;
       const r = rng(hash(path));
       const ws = Array.from({ length: count }, () => r() ** 3);
       const sum = ws.reduce((a, b) => a + b, 0) || 1;
       const items = ws.map((w, i) => ({ name: `${NAMES[i % NAMES.length].toLowerCase()}${i ? '-' + i : ''}${EXT[i % EXT.length]}`, size: Math.round((total * w) / sum), alloc: Math.ceil((total * w) / sum / 4096) * 4096, mtime: Date.now() - Math.floor(r() * 300) * 86400000 }));
       items.sort((a, b) => b.size - a.size);
+      if (gone?.size) items.splice(0, items.length, ...items.filter((x) => !gone.has(x.name.toLowerCase())));
       return { total: items.length, items: items.slice(0, limit) };
     },
     async du_cancel() { if (cur && cur.cancelled == null) cur.cancelled = frac(cur); emit('du', progress(cur)); },
     async du_close() { cur = null; },
-    async du_forget({ scan, id }) {
-      if (!cur || cur.id !== scan) return;
-      const n = cur.nodes[id];
-      if (!n || n.parent == null) return;
-      n.removed = true;
-      for (let p = cur.nodes[n.parent]; p; p = p.parent == null ? null : cur.nodes[p.parent]) { p.size -= n.size; p.alloc -= n.alloc; p.files -= n.files; }
-    },
-    async du_forget_file({ scan, dir, size }) {
-      if (!cur || cur.id !== scan) return;
-      const n = cur.nodes[dir];
-      n.own_files = Math.max(0, n.own_files - 1);
-      n.own_size = Math.max(0, n.own_size - size);
-      for (let p = n; p; p = p.parent == null ? null : cur.nodes[p.parent]) { p.size -= size; p.alloc -= size; p.files -= 1; }
-    },
+    /** Menu Windows không có trong trình duyệt; cây giả lập đã được cập nhật lúc xoá, nên chỉ trả kết quả rỗng. */
+    async du_sync_paths() { await sleep(20); return { inexact: [] }; },
     async du_delete({ paths, permanent }) {
       await sleep(300);
       if (paths.some((p) => /^[a-z]:\\?$/i.test(p) || /\\windows$/i.test(p))) throw 'Không cho phép xoá thư mục hệ thống / gốc ổ.';
       console.info('[mock] du_delete', paths, permanent);
+      for (const p of paths) await applyDelete(p, permanent);
       deleted.push(...paths);
-      return true;
+      return { done: true, inexact: [] };
     },
     async du_lookup({ paths }) {
       await sleep(120);
@@ -222,18 +259,22 @@ export function createDuMock(emit) {
     async du_delete_paths({ paths, permanent }) {
       await sleep(600);
       console.info('[mock] du_delete_paths', paths, permanent);
-      return paths.map((path) => {
-        if (PROTECTED.test(path)) return { path, ok: false, error: 'Thư mục hệ thống / gốc ổ – không cho phép xoá' };
+      const res = [];
+      for (const path of paths) {
+        if (PROTECTED.test(path)) { res.push({ path, ok: false, error: 'Thư mục hệ thống / gốc ổ – không cho phép xoá' }); continue; }
         // mô phỏng một mục đang bị khoá để xem cách hiện lỗi từng mục
-        if (/\\inetcache$/i.test(path)) return { path, ok: false, error: 'Tệp đang được một chương trình khác sử dụng.' };
+        if (/\\inetcache$/i.test(path)) { res.push({ path, ok: false, error: 'Tệp đang được một chương trình khác sử dụng.' }); continue; }
+        await applyDelete(path, permanent);
         deleted.push(path);
-        return { path, ok: true };
-      });
+        res.push({ path, ok: true });
+      }
+      return res;
     },
     async du_exists({ path }) { return !deleted.includes(path); },
     async du_open({ path, is_dir }) { console.info('[mock] du_open', path, is_dir); return null; },
     async du_menu() { throw 'Không có menu Windows trong trình duyệt'; },
     async du_pick_folder() { return null; },
   };
+  return mock;
 }
 const deleted = [];

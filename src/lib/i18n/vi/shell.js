@@ -34,8 +34,8 @@ export default {
   'shell.nav.ai': 'Trợ lý AI',
   'shell.nav.ai_tip': 'Trợ lý AI (Ctrl+J)',
   'shell.nav.settings': 'Cài đặt',
-  'shell.nav.log': 'Mở log',
-  'shell.nav.log_tip': 'Mở tệp log',
+  'shell.nav.whatsnew': 'Có gì mới',
+  'shell.nav.whatsnew_tip': 'Nhật ký thay đổi của từng phiên bản',
 
   // StatusBar
   'shell.status.label': 'Thanh trạng thái',

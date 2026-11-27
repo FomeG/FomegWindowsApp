@@ -11,5 +11,6 @@ import startup from './startup.js';
 import ai from './ai.js';
 import ports from './ports.js';
 import update from './update.js';
+import env from './env.js';
 
-export default { ...common, ...shell, ...settings, ...procs, ...perf, ...apps, ...disk, ...cleanup, ...startup, ...ai, ...ports, ...update };
+export default { ...common, ...shell, ...settings, ...procs, ...perf, ...apps, ...disk, ...cleanup, ...startup, ...ai, ...ports, ...update, ...env };

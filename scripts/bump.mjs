@@ -55,4 +55,29 @@ edit('package-lock.json', (s) => {
 edit('src-tauri/Cargo.toml', cargoToml);
 edit('mcp/Cargo.toml', cargoToml);
 edit('Cargo.lock', cargoLock(['fomeg-windows-app', 'fomeg-windows-app-mcp']));
-console.log(`\nXong. Tiếp theo:\n  git commit -am "chore: phát hành v${to}"\n  git push   rồi mở PR dev -> main; merge xong CI tự build và phát hành v${to}.`);
+// CHANGELOG.md + CHANGELOG.vi.md (Keep a Changelog): "## [Unreleased]" -> "## [to] - YYYY-MM-DD", thêm "## [Unreleased]"
+// trống ở trên, sửa link so sánh cuối tệp. Unreleased chưa có gì -> vẫn tạo mục version (trống: release lấy commit).
+const date = new Date().toISOString().slice(0, 10);
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+let emptyNotes = false;
+for (const file of ['CHANGELOG.md', 'CHANGELOG.vi.md']) {
+  // đã có mục version này (viết tay) -> để nguyên
+  if (!existsSync(file) || new RegExp(`^## \\[${esc(to)}\\]`, 'm').test(readFileSync(file, 'utf8'))) continue;
+  edit(file, (s) => {
+    const un = s.match(/^## \[Unreleased\][^\n]*\n([\s\S]*?)(?=^## |^\[[^\]]+\]:|(?![\s\S]))/im);
+    if (un && !/^[-*]\s+\S/m.test(un[1])) emptyNotes = true;
+    let out = un
+      ? s.replace(/^## \[Unreleased\][^\n]*\n/im, `## [Unreleased]\n\n## [${to}] - ${date}\n`)
+      : s.replace(/^(## )/m, `## [${to}] - ${date}\n\n$1`);
+    // [unreleased]: …/compare/vCUR...HEAD -> vTO...HEAD, thêm [to]: …/compare/vCUR...vTO
+    out = out.replace(/^\[unreleased\]:\s*(\S+)\/compare\/v([^.\s]+\.[^.\s]+\.[^.\s]+)\.\.\.HEAD$/im, (_m, base, prev) =>
+      `[unreleased]: ${base}/compare/v${to}...HEAD\n[${to}]: ${base}/compare/v${prev}...v${to}`);
+    return out;
+  });
+}
+console.log(
+  `\nXong. Tiếp theo:\n` +
+    (emptyNotes ? `  ⚠ [Unreleased] đang trống: viết mục [${to}] trong CHANGELOG.vi.md + CHANGELOG.md (không thì release lấy tiêu đề commit)\n` : '') +
+    `  xem trước ghi chú: npm run notes\n` +
+    `  git commit -am "chore: release v${to}"\n  git push   rồi mở PR dev -> main; merge xong CI tự build và phát hành v${to}.`,
+);

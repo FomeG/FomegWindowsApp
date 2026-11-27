@@ -850,6 +850,11 @@ impl ProcSampler {
         self.live.get(&pid).map(|p| &p.data)
     }
 
+    /// FILETIME gốc để đối chiếu với GetProcessTimes khi thao tác theo PID.
+    pub(crate) fn creation_time(&self, pid: u32) -> Option<u64> {
+        self.live.get(&pid).map(|p| p.created as u64)
+    }
+
     pub fn exe_of(&self, pid: u32) -> Option<&str> {
         self.live
             .get(&pid)
